@@ -63,7 +63,8 @@ ref/           # Local Flutter reference (gitignored)
 ## Notes
 
 - **Recipes** tab: text ingredients → Gemini recipe. Saved to the signed-in user in Firestore (`users/{uid}/recipes`), with local recent fallback.
-- **Analyze** tab: camera or gallery photo → Gemini nutrition (cloud history comes next).
+- **Analyze** tab: camera or gallery photo → Gemini nutrition. Saved to `users/{uid}/analyses`.
+- **Profile** shows cloud recipe and nutrition history.
 - Auth screens work once Firebase env vars are set.
 - Planner, voice, and PDF are not wired up yet.
 - `EXPO_PUBLIC_*` keys are bundled into the client — fine for Expo Go prototyping; use a backend proxy before shipping.
@@ -80,6 +81,10 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == userId;
 
       match /recipes/{document=**} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      match /analyses/{document=**} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
     }
