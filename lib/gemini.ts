@@ -1,12 +1,16 @@
+import type { NutritionInfo } from '@/types/nutrition';
 import type { Recipe } from '@/types/recipe';
 
 const API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? '';
 const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 const TEXT_MODEL = 'gemini-2.0-flash';
+const VISION_MODEL = 'gemini-2.0-flash';
 
 export const isGeminiConfigured = Boolean(API_KEY);
 
-type GeminiPart = { text: string };
+type GeminiPart =
+  | { text: string }
+  | { inline_data: { mime_type: string; data: string } };
 
 type GeminiResponse = {
   candidates?: Array<{
@@ -223,5 +227,112 @@ Return ONLY valid JSON (no markdown, no extra text) with this exact shape:
       throw error;
     }
     return fallbackRecipe(ingredients, preparationMethod, servings);
+  }
+}
+
+function toNumber(value: unknown, fallback = 0): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function fallbackNutrition(): NutritionInfo {
+  return {
+    foodName: 'Unknown Food',
+    calories: 250,
+    macros: { protein: 15, carbs: 30, fat: 10, fiber: 5 },
+    healthScore: 6,
+    description: 'Nutritional analysis could not be completed accurately.',
+    nutritionTips: [
+      'Eat a balanced diet with diverse food groups.',
+      'Consult a nutritionist for personalised advice.',
+    ],
+  };
+}
+
+function parseNutrition(data: Record<string, unknown>): NutritionInfo {
+  const macrosRaw =
+    data.macros && typeof data.macros === 'object'
+      ? (data.macros as Record<string, unknown>)
+      : {};
+
+  const tips = Array.isArray(data.nutritionTips)
+    ? data.nutritionTips.map(String)
+    : [];
+
+  return {
+    foodName:
+      typeof data.foodName === 'string' && data.foodName.trim()
+        ? data.foodName
+        : 'Unknown Food',
+    calories: Math.round(toNumber(data.calories)),
+    macros: {
+      protein: toNumber(macrosRaw.protein),
+      carbs: toNumber(macrosRaw.carbs),
+      fat: toNumber(macrosRaw.fat),
+      fiber: toNumber(macrosRaw.fiber),
+    },
+    healthScore: Math.min(10, Math.max(0, Math.round(toNumber(data.healthScore, 5)))),
+    description:
+      typeof data.description === 'string' ? data.description : '',
+    nutritionTips: tips,
+  };
+}
+
+export async function analyzeNutritionFromImage(
+  base64: string,
+  mimeType: string = 'image/jpeg',
+): Promise<NutritionInfo> {
+  if (!base64) {
+    throw new Error('No image data provided.');
+  }
+
+  try {
+    const response = await post(
+      VISION_MODEL,
+      [
+        {
+          text: `Analyse the food in this image and return detailed nutritional information.
+Return ONLY valid JSON with this exact shape:
+{
+  "foodName": "name of the dish",
+  "calories": 350,
+  "macros": {
+    "protein": 25,
+    "carbs": 40,
+    "fat": 12,
+    "fiber": 5
+  },
+  "healthScore": 7,
+  "description": "Brief healthy description of this meal.",
+  "nutritionTips": ["Tip 1", "Tip 2"]
+}
+All quantities in grams except calories. Make educated estimates from what you see.`,
+        },
+        {
+          inline_data: {
+            mime_type: mimeType,
+            data: base64,
+          },
+        },
+      ],
+      {
+        temperature: 0.4,
+        maxOutputTokens: 1024,
+        responseMimeType: 'application/json',
+      },
+    );
+
+    const raw = stripJsonFences(extractText(response));
+    try {
+      const data = JSON.parse(raw) as Record<string, unknown>;
+      return parseNutrition(data);
+    } catch {
+      return fallbackNutrition();
+    }
+  } catch (error) {
+    if (!isGeminiConfigured) {
+      throw error;
+    }
+    return fallbackNutrition();
   }
 }
