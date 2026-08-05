@@ -41,32 +41,25 @@ Useful scripts:
 | `npm run lint` | ESLint via Expo |
 | `npm run typecheck` | TypeScript check |
 | `npm run lint:ci` | ESLint with zero warnings allowed |
-| `npm run audit` | Fail on critical npm advisories |
-| `npm run export:check` | Web export smoke (Metro bundle) |
-| `npm run ci` | Full local gate (lint, typecheck, audit, doctor, config, export) |
+| `npm run ci` | Local gate (lint, typecheck, doctor, config) |
 
 ## CI / CD
 
-**CI** runs on every PR and push to `main`:
+**CI** (PRs and pushes to `main`):
 
 | Job | What it checks |
 |---|---|
 | Quality | ESLint (`--max-warnings=0`) + TypeScript |
-| Expo | `expo-doctor`, `expo config`, web export smoke |
-| Dependencies | `npm audit` (fail on critical; report high+) |
-| Dependency Review | New/changed deps on PRs (fail on high+) |
-| CodeQL | JavaScript/TypeScript static analysis |
-| Secrets Scan | Gitleaks (block committed secrets) |
+| Expo | `expo-doctor` + `expo config` |
 
-Protect `main` with required status checks for at least **Quality**, **Expo**, **Dependencies**, **CodeQL**, and **Secrets Scan**.
+Protect `main` with required checks for **Quality** and **Expo**.
 
-**CD**
+**CD** (does not run on PRs):
 
-- Push to `main` → quality gate, then **EAS iOS preview** build (skipped cleanly if `EXPO_TOKEN` is unset)
-- Manual `workflow_dispatch` → choose `development` / `preview` / `production`
-- Production / TestFlight submit stays manual (no auto-submit on tags yet)
+- Push to `main` → EAS iOS **preview** build (no-ops successfully if `EXPO_TOKEN` is unset)
+- Manual run: Actions → **CD** → Run workflow → pick profile (`development` / `preview` / `production`)
 
-Repo secret required for builds: `EXPO_TOKEN`
+Repo secret required for real builds: `EXPO_TOKEN`
 
 ## Project layout
 

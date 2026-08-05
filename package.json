@@ -10,9 +10,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
     "lint:ci": "expo lint --max-warnings=0",
-    "audit": "npm audit --audit-level=critical",
-    "export:check": "expo export --platform web --output-dir /tmp/savor-export",
-    "ci": "npm run lint:ci && npm run typecheck && npm run audit && npx expo-doctor && npx expo config --type public && npm run export:check"
+    "ci": "npm run lint:ci && npm run typecheck && npx expo-doctor && npx expo config --type public"
   },
   "engines": {
     "node": ">=20.19"

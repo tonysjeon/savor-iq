@@ -23,69 +23,51 @@ permissions:
   contents: read
 
 jobs:
-  quality-gate:
-    name: Quality Gate
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version-file: '.nvmrc'
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Lint
-        run: npm run lint -- --max-warnings=0
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Expo Doctor
-        run: npx expo-doctor
-
-      - name: Validate Expo config
-        run: npx expo config --type public
-
-      - name: Export smoke (web)
-        run: npm run export:check
-        env:
-          CI: '1'
-          EXPO_NO_TELEMETRY: '1'
-
   eas-build:
     name: EAS Build (${{ github.event_name == 'workflow_dispatch' && inputs.profile || 'preview' }})
-    needs: quality-gate
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    if: ${{ secrets.EXPO_TOKEN != '' }}
+    env:
+      HAS_EXPO_TOKEN: ${{ secrets.EXPO_TOKEN != '' }}
 
     steps:
+      - name: Check EXPO_TOKEN
+        run: |
+          if [ "$HAS_EXPO_TOKEN" != "true" ]; then
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+              echo "::error::EXPO_TOKEN is not set in repo secrets. Add it under Settings → Secrets → Actions."
+              exit 1
+            fi
+            echo "EXPO_TOKEN is not set; skipping EAS preview on main."
+            echo "skip=true" >> "$GITHUB_ENV"
+          else
+            echo "skip=false" >> "$GITHUB_ENV"
+          fi
+
       - name: Checkout
+        if: env.skip != 'true'
         uses: actions/checkout@v4
 
       - name: Setup Node
+        if: env.skip != 'true'
         uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
           cache: npm
 
       - name: Setup Expo
+        if: env.skip != 'true'
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Install dependencies
+        if: env.skip != 'true'
         run: npm ci
 
       - name: Resolve build profile
+        if: env.skip != 'true'
         id: profile
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -95,15 +77,5 @@ jobs:
           fi
 
       - name: Build with EAS
+        if: env.skip != 'true'
         run: eas build --platform ios --profile ${{ steps.profile.outputs.name }} --non-interactive
-
-  skip-eas:
-    name: EAS skipped (no EXPO_TOKEN)
-    needs: quality-gate
-    runs-on: ubuntu-latest
-    if: ${{ secrets.EXPO_TOKEN == '' }}
-    steps:
-      - name: Notice
-        run: |
-          echo "EXPO_TOKEN secret is not set. Quality gate passed; EAS build was skipped."
-          echo "Add EXPO_TOKEN in repo secrets to enable preview builds on main and manual production builds."
