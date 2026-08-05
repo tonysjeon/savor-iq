@@ -29,13 +29,13 @@ const STEPS = [
 
 export default function AnalyzeProcessingScreen() {
   const { user } = useAuth();
+  const userId = user?.uid ?? null;
   const [attempt, setAttempt] = useState(0);
   const [stepIndex, setStepIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const pulse = useRef(new Animated.Value(0)).current;
   const progress = useRef(new Animated.Value(0)).current;
-  const cancelled = useRef(false);
 
   useEffect(() => {
     const session = getAnalyzeSession();
@@ -44,11 +44,11 @@ export default function AnalyzeProcessingScreen() {
       return;
     }
 
+    let active = true;
     setPhotoUri(session.photo.uri);
     setError(null);
     setStepIndex(0);
     progress.setValue(0);
-    cancelled.current = false;
 
     const { base64, mimeType } = session.photo;
 
@@ -84,35 +84,30 @@ export default function AnalyzeProcessingScreen() {
     async function run() {
       try {
         const info = await analyzeNutritionFromImage(base64, mimeType);
+        if (!active) return;
 
-        if (cancelled.current) return;
-
-        let saveWarning: string | null = null;
-        if (user) {
-          try {
-            await saveNutritionAnalysis(user.uid, info);
-          } catch (cloudErr) {
-            saveWarning =
-              cloudErr instanceof Error
-                ? `Saved analysis locally, but cloud save failed: ${cloudErr.message}`
-                : 'Saved analysis locally, but cloud save failed.';
-          }
-        }
-
-        setAnalyzeResult(info, saveWarning);
+        setAnalyzeResult(info, null);
 
         Animated.timing(progress, {
           toValue: 1,
-          duration: 280,
+          duration: 200,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: false,
-        }).start(() => {
-          if (!cancelled.current) {
-            router.replace('/analyze/result');
-          }
-        });
+        }).start();
+
+        router.replace('/analyze/result');
+
+        if (userId) {
+          void saveNutritionAnalysis(userId, info).catch((cloudErr) => {
+            const warning =
+              cloudErr instanceof Error
+                ? `Analysis ready, but cloud save failed: ${cloudErr.message}`
+                : 'Analysis ready, but cloud save failed.';
+            setAnalyzeResult(info, warning);
+          });
+        }
       } catch (err) {
-        if (cancelled.current) return;
+        if (!active) return;
         setError(err instanceof Error ? err.message : 'Analysis failed.');
         progress.stopAnimation();
       }
@@ -121,11 +116,11 @@ export default function AnalyzeProcessingScreen() {
     void run();
 
     return () => {
-      cancelled.current = true;
+      active = false;
       pulseLoop.stop();
       clearInterval(stepTimer);
     };
-  }, [attempt, pulse, progress, user]);
+  }, [attempt, pulse, progress, userId]);
 
   const ringScale = pulse.interpolate({
     inputRange: [0, 1],
@@ -141,7 +136,6 @@ export default function AnalyzeProcessingScreen() {
   });
 
   function goBackHome() {
-    cancelled.current = true;
     router.replace('/(tabs)');
   }
 

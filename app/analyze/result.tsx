@@ -21,6 +21,15 @@ export default function AnalyzeResultScreen() {
       return;
     }
     setSession(current);
+
+    const timer = setInterval(() => {
+      const latest = getAnalyzeSession();
+      if (latest?.nutrition) {
+        setSession({ ...latest });
+      }
+    }, 500);
+
+    return () => clearInterval(timer);
   }, []);
 
   function done() {
