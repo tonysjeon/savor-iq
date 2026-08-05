@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
 
 import { useAuth } from '@/context/AuthContext';
 import { colors } from '@/constants/theme';
@@ -28,9 +29,32 @@ export default function ProfileScreen() {
   const [signingOut, setSigningOut] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
   const [recipes, setRecipes] = useState<SavedRecipe[]>([]);
   const [analyses, setAnalyses] = useState<SavedNutrition[]>([]);
   const [historyError, setHistoryError] = useState<string | null>(null);
+
+  const refreshFromNetwork = useCallback(async (uid: string) => {
+    setRefreshing(true);
+    setHistoryError(null);
+    try {
+      const [nextRecipes, nextAnalyses] = await Promise.all([
+        listRecipes(uid, 10),
+        listNutritionAnalyses(uid, 10),
+      ]);
+      setRecipes(nextRecipes);
+      setAnalyses(nextAnalyses);
+    } catch (err) {
+      setHistoryError(
+        err instanceof Error
+          ? err.message
+          : 'Could not load saved history from Firestore.',
+      );
+    } finally {
+      setRefreshing(false);
+      setLoadingHistory(false);
+    }
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -38,63 +62,58 @@ export default function ProfileScreen() {
       const uid = user.uid;
 
       let active = true;
-      setHistoryError(null);
 
+      // Re-read local cache on focus so new saves appear without a network trip.
       const syncCache = getHistoryCacheSync(uid);
       if (syncCache) {
         setRecipes(syncCache.recipes);
         setAnalyses(syncCache.analyses);
         setLoadingHistory(false);
-        setRefreshing(true);
-      } else {
+        setHydrated(true);
+        return () => {
+          active = false;
+        };
+      }
+
+      if (hydrated) {
+        return () => {
+          active = false;
+        };
+      }
+
+      async function hydrate() {
         setLoadingHistory(true);
-      }
+        const disk = await loadHistoryCache(uid);
+        if (!active) return;
 
-      async function load() {
-        if (!syncCache) {
-          const disk = await loadHistoryCache(uid);
-          if (!active) return;
-          if (disk) {
-            setRecipes(disk.recipes);
-            setAnalyses(disk.analyses);
-            setLoadingHistory(false);
-            setRefreshing(true);
-          }
+        if (disk) {
+          setRecipes(disk.recipes);
+          setAnalyses(disk.analyses);
+          setLoadingHistory(false);
+          setHydrated(true);
+          return;
         }
 
-        try {
-          const [nextRecipes, nextAnalyses] = await Promise.all([
-            listRecipes(uid, 10),
-            listNutritionAnalyses(uid, 10),
-          ]);
-          if (!active) return;
-          setRecipes(nextRecipes);
-          setAnalyses(nextAnalyses);
-        } catch (err) {
-          if (!active) return;
-          setHistoryError(
-            err instanceof Error
-              ? err.message
-              : 'Could not load saved history from Firestore.',
-          );
-        } finally {
-          if (active) {
-            setLoadingHistory(false);
-            setRefreshing(false);
-          }
-        }
+        // First visit with nothing cached — fetch once.
+        await refreshFromNetwork(uid);
+        if (active) setHydrated(true);
       }
 
-      void load();
+      void hydrate();
 
       return () => {
         active = false;
       };
-    }, [user]),
+    }, [user, hydrated, refreshFromNetwork]),
   );
 
   if (!loading && !user) {
     return <Redirect href="/(auth)/login" />;
+  }
+
+  async function onRefresh() {
+    if (!user || refreshing) return;
+    await refreshFromNetwork(user.uid);
   }
 
   async function onSignOut() {
@@ -108,16 +127,30 @@ export default function ProfileScreen() {
 
   return (
     <ScrollView style={styles.flex} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>Profile</Text>
-      <Text style={styles.description}>
-        {user?.displayName || user?.email || 'Signed in to Savor IQ'}
-      </Text>
+      <View style={styles.titleRow}>
+        <View style={styles.titleBlock}>
+          <Text style={styles.title}>Profile</Text>
+          <Text style={styles.description}>
+            {user?.displayName || user?.email || 'Signed in to Savor IQ'}
+          </Text>
+        </View>
+        <Pressable
+          style={[styles.refreshButton, refreshing && styles.buttonDisabled]}
+          onPress={onRefresh}
+          disabled={!user || refreshing || loadingHistory}
+          accessibilityRole="button"
+          accessibilityLabel="Refresh history"
+        >
+          {refreshing ? (
+            <ActivityIndicator color={colors.text} />
+          ) : (
+            <Ionicons name="refresh" size={20} color={colors.text} />
+          )}
+        </Pressable>
+      </View>
 
       <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Saved recipes</Text>
-          {refreshing ? <ActivityIndicator color={colors.textMuted} /> : null}
-        </View>
+        <Text style={styles.sectionTitle}>Saved recipes</Text>
         {loadingHistory ? (
           <ActivityIndicator color={colors.text} style={styles.loader} />
         ) : recipes.length === 0 ? (
@@ -137,10 +170,7 @@ export default function ProfileScreen() {
       </View>
 
       <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Nutrition history</Text>
-          {refreshing ? <ActivityIndicator color={colors.textMuted} /> : null}
-        </View>
+        <Text style={styles.sectionTitle}>Nutrition history</Text>
         {loadingHistory ? (
           <ActivityIndicator color={colors.text} style={styles.loader} />
         ) : analyses.length === 0 ? (
@@ -193,6 +223,16 @@ const styles = StyleSheet.create({
     paddingTop: 24,
     paddingBottom: 40,
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 24,
+  },
+  titleBlock: {
+    flex: 1,
+  },
   title: {
     color: colors.text,
     fontSize: 28,
@@ -203,22 +243,24 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: 16,
     lineHeight: 22,
-    marginBottom: 24,
+  },
+  refreshButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.surfaceElevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
   },
   section: {
     marginBottom: 24,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-    gap: 8,
   },
   sectionTitle: {
     color: colors.text,
     fontSize: 18,
     fontWeight: '600',
+    marginBottom: 12,
   },
   loader: {
     marginVertical: 8,
@@ -277,5 +319,8 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 16,
     fontWeight: '600',
+  },
+  buttonDisabled: {
+    opacity: 0.5,
   },
 });
