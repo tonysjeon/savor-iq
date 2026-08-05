@@ -40,12 +40,33 @@ Useful scripts:
 | `npm run web` | Run in the browser |
 | `npm run lint` | ESLint via Expo |
 | `npm run typecheck` | TypeScript check |
-| `npm run ci` | Lint + typecheck (matches CI) |
+| `npm run lint:ci` | ESLint with zero warnings allowed |
+| `npm run audit` | Fail on critical npm advisories |
+| `npm run export:check` | Web export smoke (Metro bundle) |
+| `npm run ci` | Full local gate (lint, typecheck, audit, doctor, config, export) |
 
 ## CI / CD
 
-- **CI** (on PRs and `main`): lint, typecheck, and `expo-doctor`
-- **CD**: manual GitHub Action (`CD` workflow) that runs `eas build` for iOS once `EXPO_TOKEN` is set in repo secrets
+**CI** runs on every PR and push to `main`:
+
+| Job | What it checks |
+|---|---|
+| Quality | ESLint (`--max-warnings=0`) + TypeScript |
+| Expo | `expo-doctor`, `expo config`, web export smoke |
+| Dependencies | `npm audit` (fail on critical; report high+) |
+| Dependency Review | New/changed deps on PRs (fail on high+) |
+| CodeQL | JavaScript/TypeScript static analysis |
+| Secrets Scan | Gitleaks (block committed secrets) |
+
+Protect `main` with required status checks for at least **Quality**, **Expo**, **Dependencies**, **CodeQL**, and **Secrets Scan**.
+
+**CD**
+
+- Push to `main` → quality gate, then **EAS iOS preview** build (skipped cleanly if `EXPO_TOKEN` is unset)
+- Manual `workflow_dispatch` → choose `development` / `preview` / `production`
+- Production / TestFlight submit stays manual (no auto-submit on tags yet)
+
+Repo secret required for builds: `EXPO_TOKEN`
 
 ## Project layout
 
