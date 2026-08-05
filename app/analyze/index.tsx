@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 
@@ -7,12 +8,18 @@ import { startAnalyzeSession } from '@/lib/analyzeSession';
 import { isGeminiConfigured } from '@/lib/gemini';
 
 export default function AnalyzeScreen() {
+  const [leaving, setLeaving] = useState(false);
+
   function handleClose() {
-    if (router.canGoBack()) {
-      router.back();
-    } else {
-      router.replace('/(tabs)');
-    }
+    // Drop CameraView before the dismiss animation so it doesn't flash corners.
+    setLeaving(true);
+    requestAnimationFrame(() => {
+      if (router.canGoBack()) {
+        router.back();
+      } else {
+        router.replace('/(tabs)');
+      }
+    });
   }
 
   function handleCapture(photo: CapturedMealPhoto, source: 'camera' | 'gallery') {
@@ -35,10 +42,18 @@ export default function AnalyzeScreen() {
     );
   }
 
+  if (leaving) {
+    return <View style={styles.cover} />;
+  }
+
   return <MealCamera onClose={handleClose} onCapture={handleCapture} />;
 }
 
 const styles = StyleSheet.create({
+  cover: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
   noticeScreen: {
     flex: 1,
     backgroundColor: colors.background,

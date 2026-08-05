@@ -20,7 +20,15 @@ export default function RootLayout() {
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="(auth)" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="analyze" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="analyze"
+          options={{
+            headerShown: false,
+            presentation: 'fullScreenModal',
+            animation: 'slide_from_bottom',
+            contentStyle: { backgroundColor: '#000000' },
+          }}
+        />
         <Stack.Screen name="about" options={{ title: 'About' }} />
       </Stack>
     </AuthProvider>

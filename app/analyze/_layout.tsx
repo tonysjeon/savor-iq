@@ -15,7 +15,12 @@ export default function AnalyzeLayout() {
     >
       <Stack.Screen
         name="index"
-        options={{ title: 'Analyze', headerShown: false }}
+        options={{
+          title: 'Analyze',
+          headerShown: false,
+          contentStyle: { backgroundColor: '#000000' },
+          animation: 'none',
+        }}
       />
       <Stack.Screen
         name="confirm"
