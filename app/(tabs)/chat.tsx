@@ -605,8 +605,8 @@ const styles = StyleSheet.create({
     paddingRight: 8,
   },
   optionChip: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
+    backgroundColor: '#3A3A3A',
+    borderColor: '#555555',
     borderWidth: 1,
     borderRadius: 999,
     paddingHorizontal: 14,
