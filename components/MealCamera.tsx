@@ -121,15 +121,15 @@ export function MealCamera({ onClose, onCapture, disabled = false }: MealCameraP
   const busy = capturing || pickingGallery || disabled;
 
   return (
-    <View style={[styles.root, { paddingTop: insets.top }]}>
+    <View style={styles.root}>
       {!permission ? (
-        <View style={styles.center}>
+        <View style={[styles.center, { paddingTop: insets.top }]}>
           <ActivityIndicator color={colors.text} />
         </View>
       ) : !permission.granted ? (
-        <View style={styles.center}>
+        <View style={[styles.center, { paddingTop: insets.top }]}>
           <Pressable
-            style={[styles.iconButton, styles.permissionBack]}
+            style={[styles.iconButton, styles.permissionBack, { top: insets.top + 4 }]}
             onPress={onClose}
             accessibilityLabel="Go back"
           >
@@ -166,7 +166,7 @@ export function MealCamera({ onClose, onCapture, disabled = false }: MealCameraP
             <Text style={styles.frameHint}>Center the meal in the frame</Text>
           </View>
 
-          <View style={[styles.topBar, { top: insets.top + 8 }]}>
+          <View style={[styles.topBar, { top: Math.max(insets.top, 4) }]}>
             <Pressable
               style={styles.iconButton}
               onPress={onClose}
@@ -210,11 +210,7 @@ export function MealCamera({ onClose, onCapture, disabled = false }: MealCameraP
                 onPress={openGallery}
                 accessibilityLabel="Open gallery"
               >
-                {pickingGallery ? (
-                  <ActivityIndicator color={colors.text} />
-                ) : (
-                  <Ionicons name="images-outline" size={24} color={colors.text} />
-                )}
+                <Ionicons name="images-outline" size={24} color={colors.text} />
               </Pressable>
 
               <Pressable
