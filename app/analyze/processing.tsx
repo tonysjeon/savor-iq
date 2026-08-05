@@ -183,7 +183,7 @@ export default function AnalyzeProcessingScreen() {
                 ]}
               />
               <View style={styles.core}>
-                <Ionicons name="nutrition-outline" size={28} color={colors.text} />
+                <Ionicons name="restaurant-outline" size={28} color={colors.text} />
               </View>
             </View>
 

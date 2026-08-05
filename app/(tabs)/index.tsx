@@ -80,7 +80,7 @@ export default function AnalyzeScreen() {
       <View style={styles.content}>
         <View style={styles.hero}>
           <View style={styles.heroIcon}>
-            <Ionicons name="nutrition-outline" size={36} color={colors.text} />
+            <Ionicons name="restaurant-outline" size={36} color={colors.text} />
           </View>
           <Text style={styles.heading}>Analyze a meal</Text>
           <Text style={styles.subheading}>

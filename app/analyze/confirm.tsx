@@ -48,7 +48,7 @@ export default function AnalyzeConfirmScreen() {
             disabled={!isGeminiConfigured}
             onPress={startAnalysis}
           >
-            <Ionicons name="nutrition-outline" size={18} color={colors.buttonPrimaryText} />
+            <Ionicons name="restaurant-outline" size={18} color={colors.buttonPrimaryText} />
             <Text style={styles.primaryButtonText}>Analyze</Text>
           </Pressable>
         </View>

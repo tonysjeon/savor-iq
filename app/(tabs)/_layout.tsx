@@ -42,7 +42,7 @@ export default function TabsLayout() {
         options={{
           title: 'Analyze',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="nutrition-outline" size={size} color={color} />
+            <Ionicons name="restaurant-outline" size={size} color={color} />
           ),
         }}
       />
@@ -60,7 +60,7 @@ export default function TabsLayout() {
         options={{
           title: 'Recipes',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="restaurant-outline" size={size} color={color} />
+            <Ionicons name="book-outline" size={size} color={color} />
           ),
         }}
       />
