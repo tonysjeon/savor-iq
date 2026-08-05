@@ -12,6 +12,7 @@ import { MealPlanCard } from '@/components/MealPlanCard';
 import { OptionChips } from '@/components/OptionChips';
 import { colors } from '@/constants/theme';
 import { generateMealPlan, isGeminiConfigured } from '@/lib/gemini';
+import { exportMealPlanPdf } from '@/lib/mealPlanPdf';
 import {
   PLANNER_QUESTIONS,
   type MealPlan,
@@ -25,6 +26,7 @@ export default function PlannerScreen() {
     PLANNER_QUESTIONS.map((q) => ({ ...q, options: [...q.options] })),
   );
   const [generating, setGenerating] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mealPlan, setMealPlan] = useState<MealPlan | null>(null);
 
@@ -52,6 +54,24 @@ export default function PlannerScreen() {
       );
     } finally {
       setGenerating(false);
+    }
+  }
+
+  async function onExportPdf() {
+    if (!mealPlan) return;
+
+    setError(null);
+    setExporting(true);
+    try {
+      await exportMealPlanPdf({
+        plan: mealPlan,
+        diet,
+        questions,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to export PDF.');
+    } finally {
+      setExporting(false);
     }
   }
 
@@ -117,7 +137,20 @@ export default function PlannerScreen() {
 
       {mealPlan ? (
         <View style={styles.results}>
-          <Text style={styles.resultsTitle}>7-Day Meal Plan</Text>
+          <View style={styles.resultsHeader}>
+            <Text style={styles.resultsTitle}>7-Day Meal Plan</Text>
+            <Pressable
+              style={[styles.secondaryButton, exporting && styles.buttonDisabled]}
+              disabled={exporting}
+              onPress={onExportPdf}
+            >
+              {exporting ? (
+                <ActivityIndicator color={colors.text} />
+              ) : (
+                <Text style={styles.secondaryButtonText}>Export PDF</Text>
+              )}
+            </Pressable>
+          </View>
           <MealPlanCard plan={mealPlan} />
         </View>
       ) : null}
@@ -196,10 +229,30 @@ const styles = StyleSheet.create({
   results: {
     marginTop: 28,
   },
+  resultsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 12,
+  },
   resultsTitle: {
     color: colors.text,
     fontSize: 18,
     fontWeight: '600',
-    marginBottom: 12,
+    flex: 1,
+  },
+  secondaryButton: {
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  secondaryButtonText: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
