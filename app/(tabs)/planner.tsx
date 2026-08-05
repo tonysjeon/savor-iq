@@ -206,10 +206,34 @@ export default function PlannerScreen() {
   return (
     <View style={styles.flex}>
       <View style={styles.header}>
-        <Text style={styles.heading}>Meal plan chat</Text>
-        <Text style={styles.subheading}>
-          Starts {todayName} · tap an option to answer
-        </Text>
+        <View style={styles.headerText}>
+          <Text style={styles.heading}>Meal plan chat</Text>
+          <Text style={styles.subheading}>
+            Starts {todayName} · tap an option to answer
+          </Text>
+        </View>
+        <View style={styles.headerActions}>
+          {mealPlan ? (
+            <Pressable
+              style={[styles.headerButton, exporting && styles.buttonDisabled]}
+              disabled={exporting}
+              onPress={onExportPdf}
+            >
+              {exporting ? (
+                <ActivityIndicator color={colors.text} />
+              ) : (
+                <Text style={styles.headerButtonText}>Export PDF</Text>
+              )}
+            </Pressable>
+          ) : null}
+          <Pressable
+            style={[styles.headerButton, generating && styles.buttonDisabled]}
+            disabled={generating}
+            onPress={onRestart}
+          >
+            <Text style={styles.headerButtonText}>Restart</Text>
+          </Pressable>
+        </View>
       </View>
 
       {!isGeminiConfigured ? (
@@ -279,29 +303,6 @@ export default function PlannerScreen() {
           </ScrollView>
         </View>
       ) : null}
-
-      <View style={styles.footerActions}>
-        {mealPlan ? (
-          <Pressable
-            style={[styles.secondaryButton, exporting && styles.buttonDisabled]}
-            disabled={exporting}
-            onPress={onExportPdf}
-          >
-            {exporting ? (
-              <ActivityIndicator color={colors.text} />
-            ) : (
-              <Text style={styles.secondaryButtonText}>Export PDF</Text>
-            )}
-          </Pressable>
-        ) : null}
-        <Pressable
-          style={[styles.secondaryButton, generating && styles.buttonDisabled]}
-          disabled={generating}
-          onPress={onRestart}
-        >
-          <Text style={styles.secondaryButtonText}>Restart</Text>
-        </Pressable>
-      </View>
     </View>
   );
 }
@@ -312,9 +313,35 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   header: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
     paddingHorizontal: 20,
     paddingTop: 12,
     paddingBottom: 8,
+  },
+  headerText: {
+    flex: 1,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingTop: 2,
+  },
+  headerButton: {
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    minHeight: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerButtonText: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '600',
   },
   heading: {
     color: colors.text,
@@ -400,27 +427,6 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 14,
     fontWeight: '500',
-  },
-  footerActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 10,
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-    paddingTop: 4,
-  },
-  secondaryButton: {
-    backgroundColor: colors.surfaceElevated,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    minHeight: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  secondaryButtonText: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '600',
   },
   buttonDisabled: {
     opacity: 0.5,
