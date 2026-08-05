@@ -1,10 +1,12 @@
+import type { MealPlan } from '@/types/mealPlan';
+import { weekdaysStartingFrom } from '@/types/mealPlan';
 import type { NutritionInfo } from '@/types/nutrition';
 import type { Recipe } from '@/types/recipe';
 
 const API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? '';
 const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
-const TEXT_MODEL = 'gemini-2.0-flash';
-const VISION_MODEL = 'gemini-2.0-flash';
+const TEXT_MODEL = 'gemini-3.5-flash';
+const VISION_MODEL = 'gemini-3.5-flash';
 
 export const isGeminiConfigured = Boolean(API_KEY);
 
@@ -14,8 +16,9 @@ type GeminiPart =
 
 type GeminiResponse = {
   candidates?: Array<{
+    finishReason?: string;
     content?: {
-      parts?: Array<{ text?: string }>;
+      parts?: Array<{ text?: string; thought?: boolean }>;
     };
   }>;
 };
@@ -52,11 +55,34 @@ async function post(
 }
 
 function extractText(json: GeminiResponse): string {
-  const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
+  const candidate = json.candidates?.[0];
+  const parts = candidate?.content?.parts ?? [];
+  const text = parts
+    .filter((part) => !part.thought && typeof part.text === 'string')
+    .map((part) => part.text!)
+    .join('')
+    .trim();
+
   if (!text) {
     throw new Error('Could not parse text from Gemini response');
   }
+
+  if (candidate?.finishReason === 'MAX_TOKENS') {
+    throw new Error(
+      'Gemini ran out of output tokens before finishing. Try again.',
+    );
+  }
+
   return text;
+}
+
+function parseJsonObject(raw: string): Record<string, unknown> {
+  const cleaned = stripJsonFences(raw);
+  try {
+    return JSON.parse(cleaned) as Record<string, unknown>;
+  } catch {
+    throw new Error('Could not parse JSON from Gemini response.');
+  }
 }
 
 function stripJsonFences(raw: string): string {
@@ -179,15 +205,16 @@ Return ONLY valid JSON (no markdown, no extra text) with this exact shape:
       ],
       {
         temperature: 0.7,
-        maxOutputTokens: 1024,
+        maxOutputTokens: 4096,
         responseMimeType: 'application/json',
+        thinkingConfig: { thinkingBudget: 0 },
       },
     );
 
     const raw = stripJsonFences(extractText(response));
     let data: RecipeJson;
     try {
-      data = JSON.parse(raw) as RecipeJson;
+      data = parseJsonObject(raw) as RecipeJson;
     } catch {
       return fallbackRecipe(ingredients, preparationMethod, servings);
     }
@@ -317,14 +344,15 @@ All quantities in grams except calories. Make educated estimates from what you s
       ],
       {
         temperature: 0.4,
-        maxOutputTokens: 1024,
+        maxOutputTokens: 4096,
         responseMimeType: 'application/json',
+        thinkingConfig: { thinkingBudget: 0 },
       },
     );
 
     const raw = stripJsonFences(extractText(response));
     try {
-      const data = JSON.parse(raw) as Record<string, unknown>;
+      const data = parseJsonObject(raw);
       return parseNutrition(data);
     } catch {
       return fallbackNutrition();
@@ -335,4 +363,79 @@ All quantities in grams except calories. Make educated estimates from what you s
     }
     return fallbackNutrition();
   }
+}
+
+export async function generateMealPlan(
+  preferences: string,
+  dietFilter: string,
+  startDays: string[],
+): Promise<MealPlan> {
+  const diet =
+    dietFilter === 'None' || dietFilter.trim() === '' ? 'balanced' : dietFilter;
+  const daysList = startDays.length === 7 ? startDays : weekdaysStartingFrom();
+  const dayShape = daysList
+    .map(
+      (name) =>
+        `    {"name": "${name}", "breakfast": "...", "lunch": "...", "dinner": "..."}`,
+    )
+    .join(',\n');
+
+  const response = await post(
+    TEXT_MODEL,
+    [
+      {
+        text: `You are a nutrition expert. Generate a 7-day meal plan starting today (${daysList[0]}).
+Use these exact day names in order: ${daysList.join(', ')}.
+Diet: ${diet}.
+User preferences:
+${preferences}
+
+Return ONLY valid JSON with this exact shape:
+{
+  "days": [
+${dayShape}
+  ]
+}`,
+      },
+    ],
+    {
+      temperature: 0.7,
+      maxOutputTokens: 8192,
+      responseMimeType: 'application/json',
+      thinkingConfig: { thinkingBudget: 0 },
+    },
+  );
+
+  const raw = extractText(response);
+  let data: Record<string, unknown>;
+  try {
+    data = parseJsonObject(raw);
+  } catch {
+    throw new Error('Could not parse meal plan from Gemini response.');
+  }
+
+  if (!Array.isArray(data.days)) {
+    throw new Error('Meal plan response was missing a days array.');
+  }
+
+  const days = data.days.map((day, index) => {
+    const item =
+      day && typeof day === 'object' ? (day as Record<string, unknown>) : {};
+    return {
+      name:
+        typeof item.name === 'string' && item.name.trim()
+          ? item.name
+          : daysList[index] ?? `Day ${index + 1}`,
+      breakfast:
+        typeof item.breakfast === 'string' ? item.breakfast : 'Not specified',
+      lunch: typeof item.lunch === 'string' ? item.lunch : 'Not specified',
+      dinner: typeof item.dinner === 'string' ? item.dinner : 'Not specified',
+    };
+  });
+
+  if (days.length === 0) {
+    throw new Error('Gemini returned an empty meal plan.');
+  }
+
+  return { days };
 }
