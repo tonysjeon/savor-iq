@@ -22,6 +22,7 @@ import {
   prependRecentRecipe,
   saveRecentRecipes,
 } from '@/lib/recentRecipes';
+import { getHistoryCacheSync, loadHistoryCache } from '@/lib/userHistoryCache';
 import {
   DIET_OPTIONS,
   PREPARATION_METHODS,
@@ -48,6 +49,19 @@ export default function RecipesScreen() {
 
     async function loadHistory() {
       if (user) {
+        const syncCache = getHistoryCacheSync(user.uid);
+        if (syncCache?.recipes.length) {
+          setRecentRecipes(syncCache.recipes);
+          setHistorySource('cloud');
+        } else {
+          const disk = await loadHistoryCache(user.uid);
+          if (!active) return;
+          if (disk?.recipes.length) {
+            setRecentRecipes(disk.recipes);
+            setHistorySource('cloud');
+          }
+        }
+
         try {
           const cloud = await listRecipes(user.uid, 10);
           if (!active) return;

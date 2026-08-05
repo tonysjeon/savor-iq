@@ -43,3 +43,6 @@ yarn-error.*
 
 # local Flutter reference app (not part of the Expo project)
 /ref/
+
+# local Cursor IDE settings/rules
+.cursor/

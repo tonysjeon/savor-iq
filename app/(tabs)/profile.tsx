@@ -18,11 +18,16 @@ import {
   type SavedNutrition,
   type SavedRecipe,
 } from '@/lib/firestore';
+import {
+  getHistoryCacheSync,
+  loadHistoryCache,
+} from '@/lib/userHistoryCache';
 
 export default function ProfileScreen() {
   const { user, loading, signOut } = useAuth();
   const [signingOut, setSigningOut] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [recipes, setRecipes] = useState<SavedRecipe[]>([]);
   const [analyses, setAnalyses] = useState<SavedNutrition[]>([]);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -30,28 +35,57 @@ export default function ProfileScreen() {
   useFocusEffect(
     useCallback(() => {
       if (!user) return;
+      const uid = user.uid;
 
       let active = true;
-      setLoadingHistory(true);
       setHistoryError(null);
 
-      Promise.all([listRecipes(user.uid, 10), listNutritionAnalyses(user.uid, 10)])
-        .then(([nextRecipes, nextAnalyses]) => {
+      const syncCache = getHistoryCacheSync(uid);
+      if (syncCache) {
+        setRecipes(syncCache.recipes);
+        setAnalyses(syncCache.analyses);
+        setLoadingHistory(false);
+        setRefreshing(true);
+      } else {
+        setLoadingHistory(true);
+      }
+
+      async function load() {
+        if (!syncCache) {
+          const disk = await loadHistoryCache(uid);
+          if (!active) return;
+          if (disk) {
+            setRecipes(disk.recipes);
+            setAnalyses(disk.analyses);
+            setLoadingHistory(false);
+            setRefreshing(true);
+          }
+        }
+
+        try {
+          const [nextRecipes, nextAnalyses] = await Promise.all([
+            listRecipes(uid, 10),
+            listNutritionAnalyses(uid, 10),
+          ]);
           if (!active) return;
           setRecipes(nextRecipes);
           setAnalyses(nextAnalyses);
-        })
-        .catch((err) => {
+        } catch (err) {
           if (!active) return;
           setHistoryError(
             err instanceof Error
               ? err.message
               : 'Could not load saved history from Firestore.',
           );
-        })
-        .finally(() => {
-          if (active) setLoadingHistory(false);
-        });
+        } finally {
+          if (active) {
+            setLoadingHistory(false);
+            setRefreshing(false);
+          }
+        }
+      }
+
+      void load();
 
       return () => {
         active = false;
@@ -80,7 +114,10 @@ export default function ProfileScreen() {
       </Text>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Saved recipes</Text>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Saved recipes</Text>
+          {refreshing ? <ActivityIndicator color={colors.textMuted} /> : null}
+        </View>
         {loadingHistory ? (
           <ActivityIndicator color={colors.text} style={styles.loader} />
         ) : recipes.length === 0 ? (
@@ -100,7 +137,10 @@ export default function ProfileScreen() {
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Nutrition history</Text>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Nutrition history</Text>
+          {refreshing ? <ActivityIndicator color={colors.textMuted} /> : null}
+        </View>
         {loadingHistory ? (
           <ActivityIndicator color={colors.text} style={styles.loader} />
         ) : analyses.length === 0 ? (
@@ -168,11 +208,17 @@ const styles = StyleSheet.create({
   section: {
     marginBottom: 24,
   },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    gap: 8,
+  },
   sectionTitle: {
     color: colors.text,
     fontSize: 18,
     fontWeight: '600',
-    marginBottom: 12,
   },
   loader: {
     marginVertical: 8,
