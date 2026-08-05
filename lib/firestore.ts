@@ -11,6 +11,12 @@ import {
 } from 'firebase/firestore';
 
 import { db } from '@/lib/firebase';
+import {
+  prependCachedAnalysis,
+  prependCachedRecipe,
+  setCachedAnalyses,
+  setCachedRecipes,
+} from '@/lib/userHistoryCache';
 import type { NutritionInfo } from '@/types/nutrition';
 import type { Recipe } from '@/types/recipe';
 
@@ -101,6 +107,7 @@ export async function saveRecipe(uid: string, recipe: Recipe): Promise<string> {
     servings: recipe.servings,
     createdAt: serverTimestamp(),
   });
+  await prependCachedRecipe(uid, { ...recipe, id: ref.id });
   return ref.id;
 }
 
@@ -117,9 +124,12 @@ export async function listRecipes(
     ),
   );
 
-  return snapshot.docs
+  const recipes = snapshot.docs
     .map((item) => parseRecipe(item.id, item.data() as Record<string, unknown>))
     .filter((item): item is SavedRecipe => item !== null);
+
+  await setCachedRecipes(uid, recipes);
+  return recipes;
 }
 
 export async function saveNutritionAnalysis(
@@ -136,6 +146,7 @@ export async function saveNutritionAnalysis(
     nutritionTips: info.nutritionTips,
     createdAt: serverTimestamp(),
   });
+  await prependCachedAnalysis(uid, { ...info, id: ref.id });
   return ref.id;
 }
 
@@ -152,9 +163,12 @@ export async function listNutritionAnalyses(
     ),
   );
 
-  return snapshot.docs
+  const analyses = snapshot.docs
     .map((item) =>
       parseNutrition(item.id, item.data() as Record<string, unknown>),
     )
     .filter((item): item is SavedNutrition => item !== null);
+
+  await setCachedAnalyses(uid, analyses);
+  return analyses;
 }
