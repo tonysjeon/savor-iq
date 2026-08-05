@@ -8,6 +8,8 @@ AI-assisted recipe and meal planning for iOS, built with Expo.
 - **TypeScript**
 - **Expo Router** — file-based navigation
 - **Firebase Auth** — email/password (configure via `.env`)
+- **Gemini** — recipes from text + meal photo nutrition (`EXPO_PUBLIC_GEMINI_API_KEY`)
+- **expo-image-picker** — camera / gallery for Analyze
 
 ## Prerequisites
 
@@ -15,13 +17,14 @@ AI-assisted recipe and meal planning for iOS, built with Expo.
 - [Expo Go](https://expo.dev/go) on your iPhone (**SDK 54** — current App Store version)
 - Same Wi‑Fi network as your Mac (or use tunnel mode)
 - A Firebase project with Email/Password auth enabled
+- A [Google AI Studio](https://aistudio.google.com/apikey) Gemini API key
 
 ## Getting started
 
 ```bash
 npm install
 cp .env.example .env
-# fill in EXPO_PUBLIC_FIREBASE_* values
+# fill in EXPO_PUBLIC_FIREBASE_* and EXPO_PUBLIC_GEMINI_API_KEY
 npm start
 ```
 
@@ -51,10 +54,14 @@ app/           # Expo Router screens
 components/    # Shared UI
 constants/     # Theme tokens
 context/       # Auth provider
-lib/           # Firebase client
+lib/           # Firebase + Gemini clients
 ref/           # Local Flutter reference (gitignored)
 ```
 
 ## Notes
 
-Gemini, camera, voice, and PDF are not wired up yet. Auth screens work once Firebase env vars are set.
+- **Recipes** tab: text ingredients → Gemini recipe (title, steps, nutrition). Recent recipes are stored locally on device.
+- **Analyze** tab: camera or gallery photo → Gemini nutrition breakdown (calories, macros, tips).
+- Auth screens work once Firebase env vars are set.
+- Planner, cloud storage, voice, and PDF are not wired up yet.
+- `EXPO_PUBLIC_*` keys are bundled into the client — fine for Expo Go prototyping; use a backend proxy before shipping.
