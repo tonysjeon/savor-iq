@@ -8,6 +8,7 @@ AI-assisted recipe and meal planning for iOS, built with Expo.
 - **TypeScript**
 - **Expo Router** — file-based navigation
 - **Firebase Auth** — email/password (configure via `.env`)
+- **Cloud Firestore** — save recipes and nutrition history per signed-in user
 - **Gemini** — recipes from text + meal photo nutrition (`EXPO_PUBLIC_GEMINI_API_KEY`)
 - **expo-image-picker** — camera / gallery for Analyze
 
@@ -17,6 +18,7 @@ AI-assisted recipe and meal planning for iOS, built with Expo.
 - [Expo Go](https://expo.dev/go) on your iPhone (**SDK 54** — current App Store version)
 - Same Wi‑Fi network as your Mac (or use tunnel mode)
 - A Firebase project with Email/Password auth enabled
+- Cloud Firestore created in that Firebase project (start in test mode, then apply the rules below)
 - A [Google AI Studio](https://aistudio.google.com/apikey) Gemini API key
 
 ## Getting started
@@ -60,8 +62,27 @@ ref/           # Local Flutter reference (gitignored)
 
 ## Notes
 
-- **Recipes** tab: text ingredients → Gemini recipe (title, steps, nutrition). Recent recipes are stored locally on device.
-- **Analyze** tab: camera or gallery photo → Gemini nutrition breakdown (calories, macros, tips).
+- **Recipes** tab: text ingredients → Gemini recipe. Saved to the signed-in user in Firestore (`users/{uid}/recipes`), with local recent fallback.
+- **Analyze** tab: camera or gallery photo → Gemini nutrition (cloud history comes next).
 - Auth screens work once Firebase env vars are set.
-- Planner, cloud storage, voice, and PDF are not wired up yet.
+- Planner, voice, and PDF are not wired up yet.
 - `EXPO_PUBLIC_*` keys are bundled into the client — fine for Expo Go prototyping; use a backend proxy before shipping.
+
+## Firestore rules
+
+Enable Firestore, then use rules that keep each user to their own data:
+
+```
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+      match /recipes/{document=**} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+  }
+}
+```

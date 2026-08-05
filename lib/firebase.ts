@@ -6,6 +6,7 @@ import {
   getReactNativePersistence,
   initializeAuth,
 } from 'firebase/auth';
+import { Firestore, getFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
@@ -25,6 +26,7 @@ export const isFirebaseConfigured = Boolean(
 
 let app: FirebaseApp | null = null;
 let auth: Auth | null = null;
+let db: Firestore | null = null;
 
 if (isFirebaseConfigured) {
   app = getApps().length ? getApp() : initializeApp(firebaseConfig);
@@ -36,6 +38,8 @@ if (isFirebaseConfigured) {
   } catch {
     auth = getAuth(app);
   }
+
+  db = getFirestore(app);
 }
 
-export { app, auth };
+export { app, auth, db };
