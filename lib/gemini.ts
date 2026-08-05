@@ -23,6 +23,8 @@ type GeminiResponse = {
   }>;
 };
 
+const GEMINI_TIMEOUT_MS = 45_000;
+
 async function post(
   model: string,
   parts: GeminiPart[],
@@ -34,17 +36,31 @@ async function post(
     );
   }
 
-  const response = await fetch(
-    `${BASE_URL}/models/${model}:generateContent?key=${API_KEY}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts }],
-        ...(generationConfig ? { generationConfig } : {}),
-      }),
-    },
-  );
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(
+      `${BASE_URL}/models/${model}:generateContent?key=${API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts }],
+          ...(generationConfig ? { generationConfig } : {}),
+        }),
+        signal: controller.signal,
+      },
+    );
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Gemini timed out. Check your connection and try again.');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!response.ok) {
     const body = await response.text();
@@ -313,12 +329,11 @@ export async function analyzeNutritionFromImage(
     throw new Error('No image data provided.');
   }
 
-  try {
-    const response = await post(
-      VISION_MODEL,
-      [
-        {
-          text: `Analyse the food in this image and return detailed nutritional information.
+  const response = await post(
+    VISION_MODEL,
+    [
+      {
+        text: `Analyse the food in this image and return detailed nutritional information.
 Return ONLY valid JSON with this exact shape:
 {
   "foodName": "name of the dish",
@@ -334,33 +349,27 @@ Return ONLY valid JSON with this exact shape:
   "nutritionTips": ["Tip 1", "Tip 2"]
 }
 All quantities in grams except calories. Make educated estimates from what you see.`,
-        },
-        {
-          inline_data: {
-            mime_type: mimeType,
-            data: base64,
-          },
-        },
-      ],
-      {
-        temperature: 0.4,
-        maxOutputTokens: 4096,
-        responseMimeType: 'application/json',
-        thinkingConfig: { thinkingBudget: 0 },
       },
-    );
+      {
+        inline_data: {
+          mime_type: mimeType,
+          data: base64,
+        },
+      },
+    ],
+    {
+      temperature: 0.4,
+      maxOutputTokens: 4096,
+      responseMimeType: 'application/json',
+      thinkingConfig: { thinkingBudget: 0 },
+    },
+  );
 
-    const raw = stripJsonFences(extractText(response));
-    try {
-      const data = parseJsonObject(raw);
-      return parseNutrition(data);
-    } catch {
-      return fallbackNutrition();
-    }
-  } catch (error) {
-    if (!isGeminiConfigured) {
-      throw error;
-    }
+  const raw = stripJsonFences(extractText(response));
+  try {
+    const data = parseJsonObject(raw);
+    return parseNutrition(data);
+  } catch {
     return fallbackNutrition();
   }
 }

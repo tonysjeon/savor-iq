@@ -1,0 +1,105 @@
+import { useEffect, useLayoutEffect, useState } from 'react';
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { router, useNavigation } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+
+import { NutritionCard } from '@/components/NutritionCard';
+import { colors } from '@/constants/theme';
+import {
+  clearAnalyzeSession,
+  getAnalyzeSession,
+  type AnalyzeSession,
+} from '@/lib/analyzeSession';
+
+export default function AnalyzeResultScreen() {
+  const navigation = useNavigation();
+  const [session, setSession] = useState<AnalyzeSession | null>(null);
+
+  function close() {
+    clearAnalyzeSession();
+    router.replace('/(tabs)');
+  }
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerBackVisible: false,
+      gestureEnabled: true,
+      headerRight: () => (
+        <Pressable
+          onPress={close}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Close results"
+          style={styles.closeButton}
+        >
+          <Ionicons name="close" size={24} color={colors.text} />
+        </Pressable>
+      ),
+    });
+  }, [navigation]);
+
+  useEffect(() => {
+    const current = getAnalyzeSession();
+    if (!current?.nutrition) {
+      router.replace('/(tabs)');
+      return;
+    }
+    setSession(current);
+
+    const timer = setInterval(() => {
+      const latest = getAnalyzeSession();
+      if (latest?.nutrition) {
+        setSession({ ...latest });
+      }
+    }, 500);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  if (!session?.nutrition) {
+    return <View style={styles.flex} />;
+  }
+
+  return (
+    <ScrollView
+      style={styles.flex}
+      contentContainerStyle={styles.content}
+      keyboardShouldPersistTaps="handled"
+    >
+      <Image source={{ uri: session.photo.uri }} style={styles.photo} />
+
+      {session.saveWarning ? (
+        <Text style={styles.warning}>{session.saveWarning}</Text>
+      ) : null}
+
+      <NutritionCard info={session.nutrition} />
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  flex: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  content: {
+    padding: 20,
+    paddingBottom: 40,
+    gap: 16,
+  },
+  photo: {
+    width: '100%',
+    aspectRatio: 4 / 3,
+    borderRadius: 16,
+    backgroundColor: colors.surface,
+  },
+  warning: {
+    color: '#FFB74D',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  closeButton: {
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+  },
+});

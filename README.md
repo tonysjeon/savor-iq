@@ -10,7 +10,8 @@ AI-assisted recipe and meal planning for iOS, built with Expo.
 - **Firebase Auth** — email/password (configure via `.env`)
 - **Cloud Firestore** — save recipes and nutrition history per signed-in user
 - **Gemini** — recipes from text + meal photo nutrition (`EXPO_PUBLIC_GEMINI_API_KEY`)
-- **expo-image-picker** — camera / gallery for Analyze
+- **expo-camera** — in-app meal capture for Analyze (frame guide, retake)
+- **expo-image-picker** — gallery picks for Analyze
 
 ## Prerequisites
 
@@ -63,11 +64,11 @@ ref/           # Local Flutter reference (gitignored)
 ## Notes
 
 - **Recipes** tab: text ingredients → Gemini recipe. Saved to the signed-in user in Firestore (`users/{uid}/recipes`), with local recent fallback.
-- **Analyze** tab: camera or gallery photo → Gemini nutrition. Saved to `users/{uid}/analyses`.
+- **Analyze** tab: take/confirm photo → processing screen → results page. Gallery supported. Saved to `users/{uid}/analyses`.
 - **Planner** tab: chat-style preference quiz → 7-day meal plan starting today, with PDF export.
 - **Profile** shows cloud recipe and nutrition history.
 - Auth screens work once Firebase env vars are set.
-- Voice and camera polish are not wired up yet.
+- Voice input is not wired up yet.
 - `EXPO_PUBLIC_*` keys are bundled into the client — fine for Expo Go prototyping; use a backend proxy before shipping.
 
 ## Firestore rules
