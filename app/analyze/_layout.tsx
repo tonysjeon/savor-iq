@@ -27,6 +27,7 @@ export default function AnalyzeLayout() {
         options={{
           title: 'Confirm photo',
           headerBackButtonDisplayMode: 'minimal',
+          headerRight: () => null,
         }}
       />
       <Stack.Screen
@@ -34,6 +35,7 @@ export default function AnalyzeLayout() {
         options={{
           title: 'Analyzing',
           headerBackVisible: false,
+          headerRight: () => null,
           gestureEnabled: false,
         }}
       />
