@@ -6,21 +6,21 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors } from '@/constants/theme';
 
-const LEFT_ROUTES = ['index', 'planner'] as const;
-const RIGHT_ROUTES = ['recipes', 'profile'] as const;
+const LEFT_ROUTES = ['index', 'chat'] as const;
+const RIGHT_ROUTES = ['calendar', 'profile'] as const;
 const ANALYZE_HREF = '/analyze' as Href;
 
 const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   index: 'home-outline',
-  planner: 'calendar-outline',
-  recipes: 'book-outline',
+  chat: 'chatbubble-ellipses-outline',
+  calendar: 'calendar-outline',
   profile: 'person-outline',
 };
 
 const LABELS: Record<string, string> = {
   index: 'Home',
-  planner: 'Planner',
-  recipes: 'Recipes',
+  chat: 'Chat',
+  calendar: 'Calendar',
   profile: 'Profile',
 };
 

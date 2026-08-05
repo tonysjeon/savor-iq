@@ -9,15 +9,30 @@ import {
 } from 'react-native';
 
 import { MealPlanCard } from '@/components/MealPlanCard';
+import { RecipeCard } from '@/components/RecipeCard';
+import { useAuth } from '@/context/AuthContext';
 import { colors } from '@/constants/theme';
-import { generateMealPlan, isGeminiConfigured } from '@/lib/gemini';
+import { saveRecipe } from '@/lib/firestore';
+import { generateMealPlan, generateRecipe, isGeminiConfigured } from '@/lib/gemini';
 import { exportMealPlanPdf } from '@/lib/mealPlanPdf';
 import {
   PLANNER_QUESTIONS,
   weekdaysStartingFrom,
   type MealPlan,
 } from '@/types/mealPlan';
-import { DIET_OPTIONS, type DietOption } from '@/types/recipe';
+import {
+  DIET_OPTIONS,
+  INGREDIENT_PRESETS,
+  PREPARATION_METHODS,
+  SERVING_OPTIONS,
+  type DietOption,
+  type PreparationMethod,
+  type Recipe,
+  type ServingOption,
+} from '@/types/recipe';
+
+const MODE_OPTIONS = ['Meal plan', 'Recipe'] as const;
+const SERVING_LABELS = SERVING_OPTIONS.map(String);
 
 type TextMessage = {
   id: string;
@@ -35,11 +50,23 @@ type PlanMessage = {
   plan: MealPlan;
 };
 
-type ChatMessage = TextMessage | PlanMessage;
+type RecipeMessage = {
+  id: string;
+  role: 'assistant';
+  kind: 'recipe';
+  recipe: Recipe;
+};
+
+type ChatMessage = TextMessage | PlanMessage | RecipeMessage;
 
 type PendingPrompt =
-  | { type: 'diet' }
-  | { type: 'question'; index: number }
+  | { type: 'mode' }
+  | { type: 'plan-diet' }
+  | { type: 'plan-question'; index: number }
+  | { type: 'recipe-diet' }
+  | { type: 'recipe-method' }
+  | { type: 'recipe-servings' }
+  | { type: 'recipe-ingredient' }
   | { type: 'none' };
 
 let messageSeq = 0;
@@ -48,10 +75,7 @@ function nextId(prefix: string) {
   return `${prefix}-${messageSeq}`;
 }
 
-function assistantText(
-  text: string,
-  options?: readonly string[],
-): TextMessage {
+function assistantText(text: string, options?: readonly string[]): TextMessage {
   return {
     id: nextId('a'),
     role: 'assistant',
@@ -82,22 +106,29 @@ function markPromptAnswered(messages: ChatMessage[]): ChatMessage[] {
   return next;
 }
 
-export default function PlannerScreen() {
+function openingMessages(): ChatMessage[] {
+  return [
+    assistantText('Hi — what do you want to create?', MODE_OPTIONS),
+  ];
+}
+
+export default function ChatScreen() {
+  const { user } = useAuth();
   const scrollRef = useRef<ScrollView>(null);
   const startDays = weekdaysStartingFrom();
   const todayName = startDays[0];
 
-  const [messages, setMessages] = useState<ChatMessage[]>(() => [
-    assistantText(
-      `Hi — I'll build a 7-day meal plan starting today (${todayName}). First, any diet filter?`,
-      DIET_OPTIONS,
-    ),
-  ]);
-  const [pending, setPending] = useState<PendingPrompt>({ type: 'diet' });
+  const [messages, setMessages] = useState<ChatMessage[]>(openingMessages);
+  const [pending, setPending] = useState<PendingPrompt>({ type: 'mode' });
+  const [mode, setMode] = useState<'plan' | 'recipe' | null>(null);
   const [diet, setDiet] = useState<DietOption | null>(null);
   const [answers, setAnswers] = useState<{ question: string; answer: string }[]>(
     [],
   );
+  const [recipeDiet, setRecipeDiet] = useState<DietOption>('None');
+  const [recipeMethod, setRecipeMethod] =
+    useState<PreparationMethod>('Any Method');
+  const [recipeServings, setRecipeServings] = useState<ServingOption>(2);
   const [mealPlan, setMealPlan] = useState<MealPlan | null>(null);
   const [generating, setGenerating] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -132,7 +163,9 @@ export default function PlannerScreen() {
         ...current,
         assistantText("Here's your week:"),
         { id: nextId('plan'), role: 'assistant', kind: 'plan', plan },
-        assistantText('Want a PDF? Use Export at the top, or Restart to plan again.'),
+        assistantText(
+          'Want a PDF? Use Export at the top, or Restart to start over.',
+        ),
       ]);
     } catch (err) {
       const message =
@@ -148,62 +181,177 @@ export default function PlannerScreen() {
     }
   }
 
+  async function buildRecipe(ingredient: string) {
+    setGenerating(true);
+    setPending({ type: 'none' });
+    setError(null);
+    setMessages((current) => [
+      ...markPromptAnswered(current),
+      userText(ingredient),
+      assistantText('Cooking something up…'),
+    ]);
+
+    try {
+      const recipe = await generateRecipe(
+        ingredient,
+        recipeDiet,
+        recipeMethod,
+        recipeServings,
+      );
+      setMessages((current) => [
+        ...current,
+        assistantText("Here's your recipe:"),
+        { id: nextId('recipe'), role: 'assistant', kind: 'recipe', recipe },
+        assistantText('Tap Restart to create something else.'),
+      ]);
+
+      if (user) {
+        try {
+          await saveRecipe(user.uid, recipe);
+        } catch (cloudErr) {
+          setError(
+            cloudErr instanceof Error
+              ? `Recipe ready, but cloud save failed: ${cloudErr.message}`
+              : 'Recipe ready, but cloud save failed.',
+          );
+        }
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Unable to generate recipe.';
+      setError(message);
+      setMessages((current) => [
+        ...current,
+        assistantText(`I couldn't finish that recipe: ${message}`),
+        assistantText('Tap Restart to try again.'),
+      ]);
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   function onSelectOption(option: string) {
     if (generating || pending.type === 'none') return;
 
-    if (pending.type === 'diet') {
+    if (pending.type === 'mode') {
+      if (option === 'Meal plan') {
+        setMode('plan');
+        setMessages((current) => [
+          ...markPromptAnswered(current),
+          userText(option),
+          assistantText(
+            `Great — I'll build a 7-day meal plan starting today (${todayName}). Any diet filter?`,
+            DIET_OPTIONS,
+          ),
+        ]);
+        setPending({ type: 'plan-diet' });
+        return;
+      }
+
+      setMode('recipe');
+      setMessages((current) => [
+        ...markPromptAnswered(current),
+        userText(option),
+        assistantText('Any diet filter for this recipe?', DIET_OPTIONS),
+      ]);
+      setPending({ type: 'recipe-diet' });
+      return;
+    }
+
+    if (pending.type === 'plan-diet') {
       const selected = option as DietOption;
       setDiet(selected);
       setMessages((current) => [
         ...markPromptAnswered(current),
         userText(option),
-        assistantText(PLANNER_QUESTIONS[0].question, PLANNER_QUESTIONS[0].options),
+        assistantText(
+          PLANNER_QUESTIONS[0].question,
+          PLANNER_QUESTIONS[0].options,
+        ),
       ]);
-      setPending({ type: 'question', index: 0 });
+      setPending({ type: 'plan-question', index: 0 });
       return;
     }
 
-    const question = PLANNER_QUESTIONS[pending.index];
-    if (!question) return;
+    if (pending.type === 'plan-question') {
+      const question = PLANNER_QUESTIONS[pending.index];
+      if (!question) return;
 
-    const nextAnswers = [
-      ...answers,
-      { question: question.question, answer: option },
-    ];
-    setAnswers(nextAnswers);
+      const nextAnswers = [
+        ...answers,
+        { question: question.question, answer: option },
+      ];
+      setAnswers(nextAnswers);
 
-    const nextIndex = pending.index + 1;
-    if (nextIndex < PLANNER_QUESTIONS.length) {
-      const nextQuestion = PLANNER_QUESTIONS[nextIndex];
+      const nextIndex = pending.index + 1;
+      if (nextIndex < PLANNER_QUESTIONS.length) {
+        const nextQuestion = PLANNER_QUESTIONS[nextIndex];
+        setMessages((current) => [
+          ...markPromptAnswered(current),
+          userText(option),
+          assistantText(nextQuestion.question, nextQuestion.options),
+        ]);
+        setPending({ type: 'plan-question', index: nextIndex });
+        return;
+      }
+
       setMessages((current) => [
         ...markPromptAnswered(current),
         userText(option),
-        assistantText(nextQuestion.question, nextQuestion.options),
       ]);
-      setPending({ type: 'question', index: nextIndex });
+      void buildPlan(diet ?? 'None', nextAnswers);
       return;
     }
 
-    setMessages((current) => [
-      ...markPromptAnswered(current),
-      userText(option),
-    ]);
+    if (pending.type === 'recipe-diet') {
+      setRecipeDiet(option as DietOption);
+      setMessages((current) => [
+        ...markPromptAnswered(current),
+        userText(option),
+        assistantText('How should it be prepared?', PREPARATION_METHODS),
+      ]);
+      setPending({ type: 'recipe-method' });
+      return;
+    }
 
-    const selectedDiet = diet ?? 'None';
-    void buildPlan(selectedDiet, nextAnswers);
+    if (pending.type === 'recipe-method') {
+      setRecipeMethod(option as PreparationMethod);
+      setMessages((current) => [
+        ...markPromptAnswered(current),
+        userText(option),
+        assistantText('How many servings?', SERVING_LABELS),
+      ]);
+      setPending({ type: 'recipe-servings' });
+      return;
+    }
+
+    if (pending.type === 'recipe-servings') {
+      const servings = Number(option) as ServingOption;
+      setRecipeServings(servings);
+      setMessages((current) => [
+        ...markPromptAnswered(current),
+        userText(option),
+        assistantText('Pick a main ingredient focus:', INGREDIENT_PRESETS),
+      ]);
+      setPending({ type: 'recipe-ingredient' });
+      return;
+    }
+
+    if (pending.type === 'recipe-ingredient') {
+      void buildRecipe(option);
+    }
   }
 
   function onRestart() {
     messageSeq = 0;
-    setMessages([
-      assistantText(
-        `Hi — I'll build a 7-day meal plan starting today (${todayName}). First, any diet filter?`,
-        DIET_OPTIONS,
-      ),
-    ]);
-    setPending({ type: 'diet' });
+    setMessages(openingMessages());
+    setPending({ type: 'mode' });
+    setMode(null);
     setDiet(null);
     setAnswers([]);
+    setRecipeDiet('None');
+    setRecipeMethod('Any Method');
+    setRecipeServings(2);
     setMealPlan(null);
     setGenerating(false);
     setExporting(false);
@@ -230,11 +378,14 @@ export default function PlannerScreen() {
     }
   }
 
+  const typingLabel =
+    mode === 'recipe' ? 'Drafting your recipe…' : 'Drafting your plan…';
+
   return (
     <View style={styles.flex}>
       <View style={styles.header}>
         <View style={styles.headerText}>
-          <Text style={styles.heading}>Meal plan chat</Text>
+          <Text style={styles.heading}>Chat</Text>
         </View>
         <View style={styles.headerActions}>
           {mealPlan ? (
@@ -281,6 +432,14 @@ export default function PlannerScreen() {
             );
           }
 
+          if (message.kind === 'recipe') {
+            return (
+              <View key={message.id} style={styles.assistantBlock}>
+                <RecipeCard recipe={message.recipe} />
+              </View>
+            );
+          }
+
           const isUser = message.role === 'user';
           const showOptions =
             !isUser &&
@@ -298,7 +457,9 @@ export default function PlannerScreen() {
                     isUser ? styles.userBubble : styles.assistantBubble,
                   ]}
                 >
-                  <Text style={[styles.bubbleText, isUser && styles.userBubbleText]}>
+                  <Text
+                    style={[styles.bubbleText, isUser && styles.userBubbleText]}
+                  >
                     {message.text}
                   </Text>
                 </View>
@@ -330,7 +491,7 @@ export default function PlannerScreen() {
           <View style={styles.bubbleRow}>
             <View style={[styles.bubble, styles.assistantBubble, styles.typing]}>
               <ActivityIndicator color={colors.text} />
-              <Text style={styles.bubbleText}>Drafting your plan…</Text>
+              <Text style={styles.bubbleText}>{typingLabel}</Text>
             </View>
           </View>
         ) : null}
