@@ -17,7 +17,14 @@ export default function AnalyzeLayout() {
         name="index"
         options={{ title: 'Analyze', headerShown: false }}
       />
-      <Stack.Screen name="confirm" options={{ title: 'Confirm photo' }} />
+      <Stack.Screen
+        name="confirm"
+        options={{
+          title: 'Confirm photo',
+          headerBackTitleVisible: false,
+          headerBackButtonDisplayMode: 'minimal',
+        }}
+      />
       <Stack.Screen
         name="processing"
         options={{
