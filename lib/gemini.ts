@@ -15,8 +15,9 @@ type GeminiPart =
 
 type GeminiResponse = {
   candidates?: Array<{
+    finishReason?: string;
     content?: {
-      parts?: Array<{ text?: string }>;
+      parts?: Array<{ text?: string; thought?: boolean }>;
     };
   }>;
 };
@@ -53,11 +54,34 @@ async function post(
 }
 
 function extractText(json: GeminiResponse): string {
-  const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
+  const candidate = json.candidates?.[0];
+  const parts = candidate?.content?.parts ?? [];
+  const text = parts
+    .filter((part) => !part.thought && typeof part.text === 'string')
+    .map((part) => part.text!)
+    .join('')
+    .trim();
+
   if (!text) {
     throw new Error('Could not parse text from Gemini response');
   }
+
+  if (candidate?.finishReason === 'MAX_TOKENS') {
+    throw new Error(
+      'Gemini ran out of output tokens before finishing. Try again.',
+    );
+  }
+
   return text;
+}
+
+function parseJsonObject(raw: string): Record<string, unknown> {
+  const cleaned = stripJsonFences(raw);
+  try {
+    return JSON.parse(cleaned) as Record<string, unknown>;
+  } catch {
+    throw new Error('Could not parse JSON from Gemini response.');
+  }
 }
 
 function stripJsonFences(raw: string): string {
@@ -180,15 +204,16 @@ Return ONLY valid JSON (no markdown, no extra text) with this exact shape:
       ],
       {
         temperature: 0.7,
-        maxOutputTokens: 1024,
+        maxOutputTokens: 4096,
         responseMimeType: 'application/json',
+        thinkingConfig: { thinkingBudget: 0 },
       },
     );
 
     const raw = stripJsonFences(extractText(response));
     let data: RecipeJson;
     try {
-      data = JSON.parse(raw) as RecipeJson;
+      data = parseJsonObject(raw) as RecipeJson;
     } catch {
       return fallbackRecipe(ingredients, preparationMethod, servings);
     }
@@ -318,14 +343,15 @@ All quantities in grams except calories. Make educated estimates from what you s
       ],
       {
         temperature: 0.4,
-        maxOutputTokens: 1024,
+        maxOutputTokens: 4096,
         responseMimeType: 'application/json',
+        thinkingConfig: { thinkingBudget: 0 },
       },
     );
 
     const raw = stripJsonFences(extractText(response));
     try {
-      const data = JSON.parse(raw) as Record<string, unknown>;
+      const data = parseJsonObject(raw);
       return parseNutrition(data);
     } catch {
       return fallbackNutrition();
@@ -370,15 +396,16 @@ Return ONLY valid JSON with this exact shape:
     ],
     {
       temperature: 0.7,
-      maxOutputTokens: 1500,
+      maxOutputTokens: 8192,
       responseMimeType: 'application/json',
+      thinkingConfig: { thinkingBudget: 0 },
     },
   );
 
-  const raw = stripJsonFences(extractText(response));
-  let data: { days?: unknown };
+  const raw = extractText(response);
+  let data: Record<string, unknown>;
   try {
-    data = JSON.parse(raw) as { days?: unknown };
+    data = parseJsonObject(raw);
   } catch {
     throw new Error('Could not parse meal plan from Gemini response.');
   }
