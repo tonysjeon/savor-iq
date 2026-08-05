@@ -24,6 +24,8 @@ type TextMessage = {
   role: 'assistant' | 'user';
   kind: 'text';
   text: string;
+  options?: readonly string[];
+  answered?: boolean;
 };
 
 type PlanMessage = {
@@ -46,12 +48,38 @@ function nextId(prefix: string) {
   return `${prefix}-${messageSeq}`;
 }
 
-function assistantText(text: string): TextMessage {
-  return { id: nextId('a'), role: 'assistant', kind: 'text', text };
+function assistantText(
+  text: string,
+  options?: readonly string[],
+): TextMessage {
+  return {
+    id: nextId('a'),
+    role: 'assistant',
+    kind: 'text',
+    text,
+    ...(options ? { options, answered: false } : {}),
+  };
 }
 
 function userText(text: string): TextMessage {
   return { id: nextId('u'), role: 'user', kind: 'text', text };
+}
+
+function markPromptAnswered(messages: ChatMessage[]): ChatMessage[] {
+  const next = [...messages];
+  for (let i = next.length - 1; i >= 0; i -= 1) {
+    const message = next[i];
+    if (
+      message.kind === 'text' &&
+      message.role === 'assistant' &&
+      message.options &&
+      !message.answered
+    ) {
+      next[i] = { ...message, answered: true };
+      break;
+    }
+  }
+  return next;
 }
 
 export default function PlannerScreen() {
@@ -62,6 +90,7 @@ export default function PlannerScreen() {
   const [messages, setMessages] = useState<ChatMessage[]>(() => [
     assistantText(
       `Hi — I'll build a 7-day meal plan starting today (${todayName}). First, any diet filter?`,
+      DIET_OPTIONS,
     ),
   ]);
   const [pending, setPending] = useState<PendingPrompt>({ type: 'diet' });
@@ -81,13 +110,6 @@ export default function PlannerScreen() {
     return () => clearTimeout(timer);
   }, [messages, pending, generating]);
 
-  const optionChoices: readonly string[] | null =
-    pending.type === 'diet'
-      ? DIET_OPTIONS
-      : pending.type === 'question'
-        ? PLANNER_QUESTIONS[pending.index]?.options ?? null
-        : null;
-
   async function buildPlan(
     nextDiet: DietOption,
     nextAnswers: { question: string; answer: string }[],
@@ -96,10 +118,8 @@ export default function PlannerScreen() {
     setPending({ type: 'none' });
     setError(null);
     setMessages((current) => [
-      ...current,
-      assistantText(
-        `Got it. Building your 7-day plan starting ${todayName}…`,
-      ),
+      ...markPromptAnswered(current),
+      assistantText(`Got it. Building your 7-day plan starting ${todayName}…`),
     ]);
 
     try {
@@ -135,9 +155,9 @@ export default function PlannerScreen() {
       const selected = option as DietOption;
       setDiet(selected);
       setMessages((current) => [
-        ...current,
+        ...markPromptAnswered(current),
         userText(option),
-        assistantText(PLANNER_QUESTIONS[0].question),
+        assistantText(PLANNER_QUESTIONS[0].question, PLANNER_QUESTIONS[0].options),
       ]);
       setPending({ type: 'question', index: 0 });
       return;
@@ -151,17 +171,23 @@ export default function PlannerScreen() {
       { question: question.question, answer: option },
     ];
     setAnswers(nextAnswers);
-    setMessages((current) => [...current, userText(option)]);
 
     const nextIndex = pending.index + 1;
     if (nextIndex < PLANNER_QUESTIONS.length) {
+      const nextQuestion = PLANNER_QUESTIONS[nextIndex];
       setMessages((current) => [
-        ...current,
-        assistantText(PLANNER_QUESTIONS[nextIndex].question),
+        ...markPromptAnswered(current),
+        userText(option),
+        assistantText(nextQuestion.question, nextQuestion.options),
       ]);
       setPending({ type: 'question', index: nextIndex });
       return;
     }
+
+    setMessages((current) => [
+      ...markPromptAnswered(current),
+      userText(option),
+    ]);
 
     const selectedDiet = diet ?? 'None';
     void buildPlan(selectedDiet, nextAnswers);
@@ -172,6 +198,7 @@ export default function PlannerScreen() {
     setMessages([
       assistantText(
         `Hi — I'll build a 7-day meal plan starting today (${todayName}). First, any diet filter?`,
+        DIET_OPTIONS,
       ),
     ]);
     setPending({ type: 'diet' });
@@ -208,9 +235,6 @@ export default function PlannerScreen() {
       <View style={styles.header}>
         <View style={styles.headerText}>
           <Text style={styles.heading}>Meal plan chat</Text>
-          <Text style={styles.subheading}>
-            Starts {todayName} · tap an option to answer
-          </Text>
         </View>
         <View style={styles.headerActions}>
           {mealPlan ? (
@@ -258,16 +282,46 @@ export default function PlannerScreen() {
           }
 
           const isUser = message.role === 'user';
+          const showOptions =
+            !isUser &&
+            !!message.options &&
+            !message.answered &&
+            isGeminiConfigured &&
+            !generating;
+
           return (
-            <View
-              key={message.id}
-              style={[styles.bubbleRow, isUser && styles.bubbleRowUser]}
-            >
-              <View style={[styles.bubble, isUser ? styles.userBubble : styles.assistantBubble]}>
-                <Text style={[styles.bubbleText, isUser && styles.userBubbleText]}>
-                  {message.text}
-                </Text>
+            <View key={message.id} style={styles.messageBlock}>
+              <View style={[styles.bubbleRow, isUser && styles.bubbleRowUser]}>
+                <View
+                  style={[
+                    styles.bubble,
+                    isUser ? styles.userBubble : styles.assistantBubble,
+                  ]}
+                >
+                  <Text style={[styles.bubbleText, isUser && styles.userBubbleText]}>
+                    {message.text}
+                  </Text>
+                </View>
               </View>
+
+              {showOptions ? (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.optionsCarousel}
+                  contentContainerStyle={styles.optionsRow}
+                >
+                  {message.options!.map((option) => (
+                    <Pressable
+                      key={option}
+                      style={styles.optionChip}
+                      onPress={() => onSelectOption(option)}
+                    >
+                      <Text style={styles.optionChipText}>{option}</Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              ) : null}
             </View>
           );
         })}
@@ -283,26 +337,6 @@ export default function PlannerScreen() {
       </ScrollView>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
-
-      {optionChoices && isGeminiConfigured ? (
-        <View style={styles.optionsBar}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.optionsRow}
-          >
-            {optionChoices.map((option) => (
-              <Pressable
-                key={option}
-                style={styles.optionChip}
-                onPress={() => onSelectOption(option)}
-              >
-                <Text style={styles.optionChipText}>{option}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-        </View>
-      ) : null}
     </View>
   );
 }
@@ -314,7 +348,7 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
     paddingHorizontal: 20,
@@ -328,7 +362,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingTop: 2,
   },
   headerButton: {
     backgroundColor: colors.surfaceElevated,
@@ -347,12 +380,6 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 24,
     fontWeight: '700',
-    marginBottom: 4,
-  },
-  subheading: {
-    color: colors.textSecondary,
-    fontSize: 14,
-    lineHeight: 20,
   },
   notice: {
     color: colors.textSecondary,
@@ -365,8 +392,11 @@ const styles = StyleSheet.create({
   },
   chatContent: {
     paddingHorizontal: 16,
-    paddingBottom: 16,
-    gap: 10,
+    paddingBottom: 24,
+    gap: 14,
+  },
+  messageBlock: {
+    gap: 8,
   },
   bubbleRow: {
     flexDirection: 'row',
@@ -405,15 +435,13 @@ const styles = StyleSheet.create({
   assistantBlock: {
     alignSelf: 'stretch',
   },
-  optionsBar: {
-    borderTopColor: colors.border,
-    borderTopWidth: 1,
-    paddingVertical: 12,
-    backgroundColor: colors.background,
+  optionsCarousel: {
+    marginLeft: 0,
+    flexGrow: 0,
   },
   optionsRow: {
-    paddingHorizontal: 16,
     gap: 8,
+    paddingRight: 8,
   },
   optionChip: {
     backgroundColor: colors.surface,
