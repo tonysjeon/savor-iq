@@ -4,8 +4,8 @@ import type { Recipe } from '@/types/recipe';
 
 const API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? '';
 const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
-const TEXT_MODEL = 'gemini-2.0-flash';
-const VISION_MODEL = 'gemini-2.0-flash';
+const TEXT_MODEL = 'gemini-3.5-flash';
+const VISION_MODEL = 'gemini-3.5-flash';
 
 export const isGeminiConfigured = Boolean(API_KEY);
 
