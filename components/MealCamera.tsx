@@ -133,7 +133,7 @@ export function MealCamera({ onClose, onCapture, disabled = false }: MealCameraP
             onPress={onClose}
             accessibilityLabel="Go back"
           >
-            <Ionicons name="chevron-back" size={24} color={colors.text} />
+            <Ionicons name="chevron-back" size={24} color={colors.text} style={styles.backIcon} />
           </Pressable>
           <Ionicons name="camera-outline" size={40} color={colors.textMuted} />
           <Text style={styles.permissionTitle}>Camera access needed</Text>
@@ -172,7 +172,12 @@ export function MealCamera({ onClose, onCapture, disabled = false }: MealCameraP
               onPress={onClose}
               accessibilityLabel="Go back"
             >
-              <Ionicons name="chevron-back" size={24} color={colors.text} />
+              <Ionicons
+                name="chevron-back"
+                size={24}
+                color={colors.text}
+                style={styles.backIcon}
+              />
             </Pressable>
             <View style={styles.topActions}>
               {facing === 'back' ? (
@@ -291,6 +296,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.45)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  backIcon: {
+    // Ionicons chevron-back sits left of center in its glyph box.
+    transform: [{ translateX: 2 }],
   },
   frameGuide: {
     position: 'absolute',
