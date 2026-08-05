@@ -11,8 +11,8 @@ AI-assisted recipe and meal planning for iOS, built with Expo.
 
 ## Prerequisites
 
-- Node.js 22+
-- [Expo Go](https://expo.dev/go) on your iPhone
+- Node.js 20.19+
+- [Expo Go](https://expo.dev/go) on your iPhone (**SDK 54** — current App Store version)
 - Same Wi‑Fi network as your Mac (or use tunnel mode)
 - A Firebase project with Email/Password auth enabled
 
