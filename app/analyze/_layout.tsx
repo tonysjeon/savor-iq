@@ -13,6 +13,7 @@ export default function AnalyzeLayout() {
         contentStyle: { backgroundColor: colors.background },
       }}
     >
+      <Stack.Screen name="index" options={{ title: 'Analyze' }} />
       <Stack.Screen name="confirm" options={{ title: 'Confirm photo' }} />
       <Stack.Screen
         name="processing"
