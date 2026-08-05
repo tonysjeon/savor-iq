@@ -11,6 +11,7 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 
+import { MealCamera, type CapturedMealPhoto } from '@/components/MealCamera';
 import { NutritionCard } from '@/components/NutritionCard';
 import { useAuth } from '@/context/AuthContext';
 import { colors } from '@/constants/theme';
@@ -18,32 +19,15 @@ import { saveNutritionAnalysis } from '@/lib/firestore';
 import { analyzeNutritionFromImage, isGeminiConfigured } from '@/lib/gemini';
 import type { NutritionInfo } from '@/types/nutrition';
 
-type PickedImage = {
-  uri: string;
-  base64: string;
-  mimeType: string;
-};
-
 export default function AnalyzeScreen() {
   const { user } = useAuth();
-  const [image, setImage] = useState<PickedImage | null>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [image, setImage] = useState<CapturedMealPhoto | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nutrition, setNutrition] = useState<NutritionInfo | null>(null);
 
-  async function ensurePermission(source: 'camera' | 'library'): Promise<boolean> {
-    if (source === 'camera') {
-      const current = await ImagePicker.getCameraPermissionsAsync();
-      const result = current.granted
-        ? current
-        : await ImagePicker.requestCameraPermissionsAsync();
-      if (!result.granted) {
-        setError('Camera permission is required to take a photo.');
-        return false;
-      }
-      return true;
-    }
-
+  async function ensureLibraryPermission(): Promise<boolean> {
     const current = await ImagePicker.getMediaLibraryPermissionsAsync();
     const result = current.granted
       ? current
@@ -55,7 +39,7 @@ export default function AnalyzeScreen() {
     return true;
   }
 
-  async function pickAndAnalyze(source: 'camera' | 'library') {
+  async function analyzePhoto(picked: CapturedMealPhoto) {
     if (!isGeminiConfigured) {
       setError(
         'Gemini is not configured. Add EXPO_PUBLIC_GEMINI_API_KEY to your .env and restart Expo.',
@@ -63,45 +47,13 @@ export default function AnalyzeScreen() {
       return;
     }
 
-    const allowed = await ensurePermission(source);
-    if (!allowed) return;
-
-    setError(null);
-
-    const options: ImagePicker.ImagePickerOptions = {
-      mediaTypes: ['images'],
-      quality: 0.7,
-      base64: true,
-      allowsEditing: true,
-      aspect: [4, 3],
-    };
-
-    const result =
-      source === 'camera'
-        ? await ImagePicker.launchCameraAsync(options)
-        : await ImagePicker.launchImageLibraryAsync(options);
-
-    if (result.canceled || !result.assets?.[0]) return;
-
-    const asset = result.assets[0];
-    if (!asset.base64) {
-      setError('Could not read image data. Try another photo.');
-      return;
-    }
-
-    const mimeType = asset.mimeType ?? 'image/jpeg';
-    const picked: PickedImage = {
-      uri: asset.uri,
-      base64: asset.base64,
-      mimeType,
-    };
-
     setImage(picked);
     setNutrition(null);
+    setError(null);
     setAnalyzing(true);
 
     try {
-      const info = await analyzeNutritionFromImage(picked.base64, mimeType);
+      const info = await analyzeNutritionFromImage(picked.base64, picked.mimeType);
       setNutrition(info);
 
       if (user) {
@@ -122,76 +74,125 @@ export default function AnalyzeScreen() {
     }
   }
 
+  function handleCameraCapture(photo: CapturedMealPhoto) {
+    setCameraOpen(false);
+    void analyzePhoto(photo);
+  }
+
+  async function pickFromGallery() {
+    if (!isGeminiConfigured) {
+      setError(
+        'Gemini is not configured. Add EXPO_PUBLIC_GEMINI_API_KEY to your .env and restart Expo.',
+      );
+      return;
+    }
+
+    const allowed = await ensureLibraryPermission();
+    if (!allowed) return;
+
+    setError(null);
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.7,
+      base64: true,
+      allowsEditing: true,
+      aspect: [4, 3],
+    });
+
+    if (result.canceled || !result.assets?.[0]) return;
+
+    const asset = result.assets[0];
+    if (!asset.base64) {
+      setError('Could not read image data. Try another photo.');
+      return;
+    }
+
+    await analyzePhoto({
+      uri: asset.uri,
+      base64: asset.base64,
+      mimeType: asset.mimeType ?? 'image/jpeg',
+    });
+  }
+
   return (
-    <ScrollView
-      style={styles.flex}
-      contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled"
-    >
-      <Text style={styles.heading}>Analyze a meal</Text>
-      <Text style={styles.subheading}>
-        Take or choose a food photo and Gemini will estimate calories, macros, and tips.
-      </Text>
-
-      {!isGeminiConfigured ? (
-        <Text style={styles.notice}>
-          Add EXPO_PUBLIC_GEMINI_API_KEY to your .env file, then restart Expo.
+    <>
+      <ScrollView
+        style={styles.flex}
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text style={styles.heading}>Analyze a meal</Text>
+        <Text style={styles.subheading}>
+          Frame the plate in the live camera, review the shot, then get calories, macros, and tips.
         </Text>
-      ) : null}
 
-      <View style={styles.preview}>
-        {image ? (
-          <Image source={{ uri: image.uri }} style={styles.previewImage} />
-        ) : (
-          <View style={styles.previewEmpty}>
-            <Ionicons name="camera-outline" size={40} color={colors.textMuted} />
-            <Text style={styles.previewEmptyText}>No photo yet</Text>
-          </View>
-        )}
+        {!isGeminiConfigured ? (
+          <Text style={styles.notice}>
+            Add EXPO_PUBLIC_GEMINI_API_KEY to your .env file, then restart Expo.
+          </Text>
+        ) : null}
 
-        {analyzing ? (
-          <View style={styles.analyzingOverlay}>
-            <ActivityIndicator color={colors.text} size="large" />
-            <Text style={styles.analyzingText}>Analyzing nutrition…</Text>
+        <View style={styles.preview}>
+          {image ? (
+            <Image source={{ uri: image.uri }} style={styles.previewImage} />
+          ) : (
+            <View style={styles.previewEmpty}>
+              <Ionicons name="camera-outline" size={40} color={colors.textMuted} />
+              <Text style={styles.previewEmptyText}>No photo yet</Text>
+            </View>
+          )}
+
+          {analyzing ? (
+            <View style={styles.analyzingOverlay}>
+              <ActivityIndicator color={colors.text} size="large" />
+              <Text style={styles.analyzingText}>Analyzing nutrition…</Text>
+            </View>
+          ) : null}
+        </View>
+
+        <View style={styles.actions}>
+          <Pressable
+            style={[
+              styles.primaryButton,
+              (!isGeminiConfigured || analyzing) && styles.buttonDisabled,
+            ]}
+            disabled={!isGeminiConfigured || analyzing}
+            onPress={() => setCameraOpen(true)}
+          >
+            <Ionicons name="camera" size={18} color={colors.buttonPrimaryText} />
+            <Text style={styles.primaryButtonText}>Take Photo</Text>
+          </Pressable>
+
+          <Pressable
+            style={[
+              styles.secondaryButton,
+              (!isGeminiConfigured || analyzing) && styles.buttonDisabled,
+            ]}
+            disabled={!isGeminiConfigured || analyzing}
+            onPress={pickFromGallery}
+          >
+            <Ionicons name="images-outline" size={18} color={colors.text} />
+            <Text style={styles.secondaryButtonText}>Gallery</Text>
+          </Pressable>
+        </View>
+
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+
+        {nutrition ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Results</Text>
+            <NutritionCard info={nutrition} />
           </View>
         ) : null}
-      </View>
+      </ScrollView>
 
-      <View style={styles.actions}>
-        <Pressable
-          style={[
-            styles.primaryButton,
-            (!isGeminiConfigured || analyzing) && styles.buttonDisabled,
-          ]}
-          disabled={!isGeminiConfigured || analyzing}
-          onPress={() => pickAndAnalyze('camera')}
-        >
-          <Ionicons name="camera" size={18} color={colors.buttonPrimaryText} />
-          <Text style={styles.primaryButtonText}>Take Photo</Text>
-        </Pressable>
-
-        <Pressable
-          style={[
-            styles.secondaryButton,
-            (!isGeminiConfigured || analyzing) && styles.buttonDisabled,
-          ]}
-          disabled={!isGeminiConfigured || analyzing}
-          onPress={() => pickAndAnalyze('library')}
-        >
-          <Ionicons name="images-outline" size={18} color={colors.text} />
-          <Text style={styles.secondaryButtonText}>Gallery</Text>
-        </Pressable>
-      </View>
-
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-
-      {nutrition ? (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Results</Text>
-          <NutritionCard info={nutrition} />
-        </View>
-      ) : null}
-    </ScrollView>
+      <MealCamera
+        visible={cameraOpen}
+        onClose={() => setCameraOpen(false)}
+        onCapture={handleCameraCapture}
+      />
+    </>
   );
 }
 
