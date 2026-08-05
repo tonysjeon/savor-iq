@@ -64,7 +64,7 @@ ref/           # Local Flutter reference (gitignored)
 ## Notes
 
 - **Recipes** tab: text ingredients → Gemini recipe. Saved to the signed-in user in Firestore (`users/{uid}/recipes`), with local recent fallback.
-- **Analyze** tab: live camera with framing guide + review, or gallery → Gemini nutrition. Saved to `users/{uid}/analyses`.
+- **Analyze** tab: take/confirm photo → processing screen → results page. Gallery supported. Saved to `users/{uid}/analyses`.
 - **Planner** tab: chat-style preference quiz → 7-day meal plan starting today, with PDF export.
 - **Profile** shows cloud recipe and nutrition history.
 - Auth screens work once Firebase env vars are set.

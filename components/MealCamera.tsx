@@ -1,7 +1,6 @@
 import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Image,
   Modal,
   Platform,
   Pressable,
@@ -35,11 +34,9 @@ export function MealCamera({ visible, onClose, onCapture }: MealCameraProps) {
   const [torch, setTorch] = useState(false);
   const [ready, setReady] = useState(false);
   const [capturing, setCapturing] = useState(false);
-  const [preview, setPreview] = useState<CapturedMealPhoto | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   function resetSession() {
-    setPreview(null);
     setError(null);
     setCapturing(false);
     setTorch(false);
@@ -71,29 +68,19 @@ export function MealCamera({ visible, onClose, onCapture }: MealCameraProps) {
         return;
       }
 
-      setPreview({
+      const captured: CapturedMealPhoto = {
         uri: photo.uri,
         base64: photo.base64,
         mimeType: 'image/jpeg',
-      });
-      setTorch(false);
+      };
+
+      resetSession();
+      onCapture(captured);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Camera capture failed.');
     } finally {
       setCapturing(false);
     }
-  }
-
-  function confirmPhoto() {
-    if (!preview) return;
-    const photo = preview;
-    resetSession();
-    onCapture(photo);
-  }
-
-  function retake() {
-    setPreview(null);
-    setError(null);
   }
 
   return (
@@ -121,32 +108,6 @@ export function MealCamera({ visible, onClose, onCapture }: MealCameraProps) {
             <Pressable style={styles.textButton} onPress={handleClose}>
               <Text style={styles.textButtonLabel}>Cancel</Text>
             </Pressable>
-          </View>
-        ) : preview ? (
-          <View style={styles.flex}>
-            <Image source={{ uri: preview.uri }} style={styles.previewImage} />
-            <View style={[styles.topBar, { top: insets.top + 8 }]}>
-              <Pressable
-                style={styles.iconButton}
-                onPress={handleClose}
-                accessibilityLabel="Close camera"
-              >
-                <Ionicons name="close" size={24} color={colors.text} />
-              </Pressable>
-            </View>
-            <View style={[styles.reviewBar, { paddingBottom: Math.max(insets.bottom, 20) }]}>
-              <Text style={styles.hint}>Looks good? Analyze this meal or retake.</Text>
-              <View style={styles.reviewActions}>
-                <Pressable style={styles.secondaryButton} onPress={retake}>
-                  <Ionicons name="refresh" size={18} color={colors.text} />
-                  <Text style={styles.secondaryButtonText}>Retake</Text>
-                </Pressable>
-                <Pressable style={styles.primaryButton} onPress={confirmPhoto}>
-                  <Ionicons name="sparkles" size={18} color={colors.buttonPrimaryText} />
-                  <Text style={styles.primaryButtonText}>Analyze</Text>
-                </Pressable>
-              </View>
-            </View>
           </View>
         ) : (
           <View style={styles.flex}>
@@ -255,9 +216,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 8,
   },
-  previewImage: {
-    ...StyleSheet.absoluteFillObject,
-  },
   topBar: {
     position: 'absolute',
     left: 16,
@@ -365,55 +323,16 @@ const styles = StyleSheet.create({
   shutterDisabled: {
     opacity: 0.45,
   },
-  reviewBar: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    gap: 14,
-  },
-  hint: {
-    color: colors.textSecondary,
-    fontSize: 14,
-    textAlign: 'center',
-  },
-  reviewActions: {
-    flexDirection: 'row',
-    gap: 12,
-  },
   primaryButton: {
-    flex: 1,
     backgroundColor: colors.buttonPrimaryBg,
     borderRadius: 12,
     minHeight: 48,
     alignItems: 'center',
     justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
   },
   primaryButtonText: {
     color: colors.buttonPrimaryText,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  secondaryButton: {
-    flex: 1,
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: 12,
-    minHeight: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 8,
-  },
-  secondaryButtonText: {
-    color: colors.text,
     fontSize: 15,
     fontWeight: '600',
   },
