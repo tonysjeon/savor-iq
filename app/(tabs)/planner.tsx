@@ -15,6 +15,7 @@ import { generateMealPlan, isGeminiConfigured } from '@/lib/gemini';
 import { exportMealPlanPdf } from '@/lib/mealPlanPdf';
 import {
   PLANNER_QUESTIONS,
+  weekdaysStartingFrom,
   type MealPlan,
   type PlannerQuestion,
 } from '@/types/mealPlan';
@@ -29,6 +30,7 @@ export default function PlannerScreen() {
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mealPlan, setMealPlan] = useState<MealPlan | null>(null);
+  const startDays = weekdaysStartingFrom();
 
   function setAnswer(index: number, answer: string) {
     setQuestions((current) =>
@@ -46,7 +48,7 @@ export default function PlannerScreen() {
       const preferences = questions
         .map((q) => `${q.question}: ${q.answer}`)
         .join('\n');
-      const plan = await generateMealPlan(preferences, diet);
+      const plan = await generateMealPlan(preferences, diet, startDays);
       setMealPlan(plan);
     } catch (err) {
       setError(
@@ -83,7 +85,8 @@ export default function PlannerScreen() {
     >
       <Text style={styles.heading}>Plan your week</Text>
       <Text style={styles.subheading}>
-        Answer a short preference quiz and Gemini will draft a 7-day meal plan.
+        Answer a short preference quiz and Gemini will draft a 7-day meal plan
+        starting {startDays[0]}.
       </Text>
 
       {!isGeminiConfigured ? (

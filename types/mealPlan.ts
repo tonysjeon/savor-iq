@@ -15,6 +15,24 @@ export type PlannerQuestion = {
   answer: string;
 };
 
+/** JS `Date#getDay()` order: Sunday = 0 */
+export const WEEKDAY_NAMES = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+] as const;
+
+export function weekdaysStartingFrom(date: Date = new Date()): string[] {
+  const start = date.getDay();
+  return Array.from({ length: 7 }, (_, offset) => {
+    return WEEKDAY_NAMES[(start + offset) % 7];
+  });
+}
+
 export const PLANNER_QUESTIONS: PlannerQuestion[] = [
   {
     question: 'How would you describe your cooking skill level?',

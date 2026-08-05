@@ -13,7 +13,8 @@ export function MealPlanCard({ plan }: MealPlanCardProps) {
       {plan.days.map((day, index) => (
         <View key={`${day.name}-${index}`} style={styles.dayCard}>
           <Text style={styles.dayTitle}>
-            Day {index + 1}: {day.name}
+            {day.name}
+            {index === 0 ? ' · today' : ''}
           </Text>
 
           <Text style={styles.mealLabel}>Breakfast</Text>

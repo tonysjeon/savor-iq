@@ -1,4 +1,5 @@
 import type { MealPlan } from '@/types/mealPlan';
+import { weekdaysStartingFrom } from '@/types/mealPlan';
 import type { NutritionInfo } from '@/types/nutrition';
 import type { Recipe } from '@/types/recipe';
 
@@ -367,15 +368,24 @@ All quantities in grams except calories. Make educated estimates from what you s
 export async function generateMealPlan(
   preferences: string,
   dietFilter: string,
+  startDays: string[] = weekdaysStartingFrom(),
 ): Promise<MealPlan> {
   const diet =
     dietFilter === 'None' || dietFilter.trim() === '' ? 'balanced' : dietFilter;
+  const daysList = startDays.length === 7 ? startDays : weekdaysStartingFrom();
+  const dayShape = daysList
+    .map(
+      (name) =>
+        `    {"name": "${name}", "breakfast": "...", "lunch": "...", "dinner": "..."}`,
+    )
+    .join(',\n');
 
   const response = await post(
     TEXT_MODEL,
     [
       {
-        text: `You are a nutrition expert. Generate a 7-day meal plan starting Saturday.
+        text: `You are a nutrition expert. Generate a 7-day meal plan starting today (${daysList[0]}).
+Use these exact day names in order: ${daysList.join(', ')}.
 Diet: ${diet}.
 User preferences:
 ${preferences}
@@ -383,13 +393,7 @@ ${preferences}
 Return ONLY valid JSON with this exact shape:
 {
   "days": [
-    {"name": "Saturday", "breakfast": "...", "lunch": "...", "dinner": "..."},
-    {"name": "Sunday",   "breakfast": "...", "lunch": "...", "dinner": "..."},
-    {"name": "Monday",   "breakfast": "...", "lunch": "...", "dinner": "..."},
-    {"name": "Tuesday",  "breakfast": "...", "lunch": "...", "dinner": "..."},
-    {"name": "Wednesday","breakfast": "...", "lunch": "...", "dinner": "..."},
-    {"name": "Thursday", "breakfast": "...", "lunch": "...", "dinner": "..."},
-    {"name": "Friday",   "breakfast": "...", "lunch": "...", "dinner": "..."}
+${dayShape}
   ]
 }`,
       },
@@ -421,7 +425,7 @@ Return ONLY valid JSON with this exact shape:
       name:
         typeof item.name === 'string' && item.name.trim()
           ? item.name
-          : `Day ${index + 1}`,
+          : daysList[index] ?? `Day ${index + 1}`,
       breakfast:
         typeof item.breakfast === 'string' ? item.breakfast : 'Not specified',
       lunch: typeof item.lunch === 'string' ? item.lunch : 'Not specified',
