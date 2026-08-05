@@ -1,3 +1,4 @@
+import type { MealPlan } from '@/types/mealPlan';
 import type { NutritionInfo } from '@/types/nutrition';
 import type { Recipe } from '@/types/recipe';
 
@@ -335,4 +336,75 @@ All quantities in grams except calories. Make educated estimates from what you s
     }
     return fallbackNutrition();
   }
+}
+
+export async function generateMealPlan(
+  preferences: string,
+  dietFilter: string,
+): Promise<MealPlan> {
+  const diet =
+    dietFilter === 'None' || dietFilter.trim() === '' ? 'balanced' : dietFilter;
+
+  const response = await post(
+    TEXT_MODEL,
+    [
+      {
+        text: `You are a nutrition expert. Generate a 7-day meal plan starting Saturday.
+Diet: ${diet}.
+User preferences:
+${preferences}
+
+Return ONLY valid JSON with this exact shape:
+{
+  "days": [
+    {"name": "Saturday", "breakfast": "...", "lunch": "...", "dinner": "..."},
+    {"name": "Sunday",   "breakfast": "...", "lunch": "...", "dinner": "..."},
+    {"name": "Monday",   "breakfast": "...", "lunch": "...", "dinner": "..."},
+    {"name": "Tuesday",  "breakfast": "...", "lunch": "...", "dinner": "..."},
+    {"name": "Wednesday","breakfast": "...", "lunch": "...", "dinner": "..."},
+    {"name": "Thursday", "breakfast": "...", "lunch": "...", "dinner": "..."},
+    {"name": "Friday",   "breakfast": "...", "lunch": "...", "dinner": "..."}
+  ]
+}`,
+      },
+    ],
+    {
+      temperature: 0.7,
+      maxOutputTokens: 1500,
+      responseMimeType: 'application/json',
+    },
+  );
+
+  const raw = stripJsonFences(extractText(response));
+  let data: { days?: unknown };
+  try {
+    data = JSON.parse(raw) as { days?: unknown };
+  } catch {
+    throw new Error('Could not parse meal plan from Gemini response.');
+  }
+
+  if (!Array.isArray(data.days)) {
+    throw new Error('Meal plan response was missing a days array.');
+  }
+
+  const days = data.days.map((day, index) => {
+    const item =
+      day && typeof day === 'object' ? (day as Record<string, unknown>) : {};
+    return {
+      name:
+        typeof item.name === 'string' && item.name.trim()
+          ? item.name
+          : `Day ${index + 1}`,
+      breakfast:
+        typeof item.breakfast === 'string' ? item.breakfast : 'Not specified',
+      lunch: typeof item.lunch === 'string' ? item.lunch : 'Not specified',
+      dinner: typeof item.dinner === 'string' ? item.dinner : 'Not specified',
+    };
+  });
+
+  if (days.length === 0) {
+    throw new Error('Gemini returned an empty meal plan.');
+  }
+
+  return { days };
 }
