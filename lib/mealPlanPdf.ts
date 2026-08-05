@@ -1,7 +1,7 @@
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 
-import type { MealPlan, PlannerQuestion } from '@/types/mealPlan';
+import type { MealPlan } from '@/types/mealPlan';
 
 function escapeHtml(value: string): string {
   return value
@@ -15,9 +15,9 @@ function escapeHtml(value: string): string {
 export function buildMealPlanHtml(params: {
   plan: MealPlan;
   diet: string;
-  questions: PlannerQuestion[];
+  answers: Array<{ question: string; answer: string }>;
 }): string {
-  const preferenceItems = params.questions
+  const preferenceItems = params.answers
     .map(
       (q) =>
         `<li><strong>${escapeHtml(q.question)}</strong>: ${escapeHtml(q.answer)}</li>`,
@@ -28,7 +28,7 @@ export function buildMealPlanHtml(params: {
     .map(
       (day, index) => `
       <section class="day">
-        <h2>Day ${index + 1}: ${escapeHtml(day.name)}</h2>
+        <h2>${escapeHtml(day.name)}${index === 0 ? ' (today)' : ''}</h2>
         <h3>Breakfast</h3>
         <p>${escapeHtml(day.breakfast)}</p>
         <h3>Lunch</h3>
@@ -70,7 +70,7 @@ export function buildMealPlanHtml(params: {
 export async function exportMealPlanPdf(params: {
   plan: MealPlan;
   diet: string;
-  questions: PlannerQuestion[];
+  answers: Array<{ question: string; answer: string }>;
 }): Promise<void> {
   const html = buildMealPlanHtml(params);
   const file = await Print.printToFileAsync({ html });

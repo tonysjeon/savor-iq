@@ -368,7 +368,7 @@ All quantities in grams except calories. Make educated estimates from what you s
 export async function generateMealPlan(
   preferences: string,
   dietFilter: string,
-  startDays: string[] = weekdaysStartingFrom(),
+  startDays: string[],
 ): Promise<MealPlan> {
   const diet =
     dietFilter === 'None' || dietFilter.trim() === '' ? 'balanced' : dietFilter;

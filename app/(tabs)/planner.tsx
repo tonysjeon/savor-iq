@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -9,7 +9,6 @@ import {
 } from 'react-native';
 
 import { MealPlanCard } from '@/components/MealPlanCard';
-import { OptionChips } from '@/components/OptionChips';
 import { colors } from '@/constants/theme';
 import { generateMealPlan, isGeminiConfigured } from '@/lib/gemini';
 import { exportMealPlanPdf } from '@/lib/mealPlanPdf';
@@ -17,58 +16,185 @@ import {
   PLANNER_QUESTIONS,
   weekdaysStartingFrom,
   type MealPlan,
-  type PlannerQuestion,
 } from '@/types/mealPlan';
 import { DIET_OPTIONS, type DietOption } from '@/types/recipe';
 
+type TextMessage = {
+  id: string;
+  role: 'assistant' | 'user';
+  kind: 'text';
+  text: string;
+};
+
+type PlanMessage = {
+  id: string;
+  role: 'assistant';
+  kind: 'plan';
+  plan: MealPlan;
+};
+
+type ChatMessage = TextMessage | PlanMessage;
+
+type PendingPrompt =
+  | { type: 'diet' }
+  | { type: 'question'; index: number }
+  | { type: 'none' };
+
+let messageSeq = 0;
+function nextId(prefix: string) {
+  messageSeq += 1;
+  return `${prefix}-${messageSeq}`;
+}
+
+function assistantText(text: string): TextMessage {
+  return { id: nextId('a'), role: 'assistant', kind: 'text', text };
+}
+
+function userText(text: string): TextMessage {
+  return { id: nextId('u'), role: 'user', kind: 'text', text };
+}
+
 export default function PlannerScreen() {
-  const [diet, setDiet] = useState<DietOption>('None');
-  const [questions, setQuestions] = useState<PlannerQuestion[]>(
-    PLANNER_QUESTIONS.map((q) => ({ ...q, options: [...q.options] })),
+  const scrollRef = useRef<ScrollView>(null);
+  const startDays = weekdaysStartingFrom();
+  const todayName = startDays[0];
+
+  const [messages, setMessages] = useState<ChatMessage[]>(() => [
+    assistantText(
+      `Hi — I'll build a 7-day meal plan starting today (${todayName}). First, any diet filter?`,
+    ),
+  ]);
+  const [pending, setPending] = useState<PendingPrompt>({ type: 'diet' });
+  const [diet, setDiet] = useState<DietOption | null>(null);
+  const [answers, setAnswers] = useState<{ question: string; answer: string }[]>(
+    [],
   );
+  const [mealPlan, setMealPlan] = useState<MealPlan | null>(null);
   const [generating, setGenerating] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [mealPlan, setMealPlan] = useState<MealPlan | null>(null);
-  const startDays = weekdaysStartingFrom();
 
-  function setAnswer(index: number, answer: string) {
-    setQuestions((current) =>
-      current.map((question, i) =>
-        i === index ? { ...question, answer } : question,
-      ),
-    );
-  }
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [messages, pending, generating]);
 
-  async function onGenerate() {
-    setError(null);
+  const optionChoices: readonly string[] | null =
+    pending.type === 'diet'
+      ? DIET_OPTIONS
+      : pending.type === 'question'
+        ? PLANNER_QUESTIONS[pending.index]?.options ?? null
+        : null;
+
+  async function buildPlan(
+    nextDiet: DietOption,
+    nextAnswers: { question: string; answer: string }[],
+  ) {
     setGenerating(true);
+    setPending({ type: 'none' });
+    setError(null);
+    setMessages((current) => [
+      ...current,
+      assistantText(
+        `Got it. Building your 7-day plan starting ${todayName}…`,
+      ),
+    ]);
 
     try {
-      const preferences = questions
-        .map((q) => `${q.question}: ${q.answer}`)
+      const preferences = nextAnswers
+        .map((item) => `${item.question}: ${item.answer}`)
         .join('\n');
-      const plan = await generateMealPlan(preferences, diet, startDays);
+      const plan = await generateMealPlan(preferences, nextDiet, startDays);
       setMealPlan(plan);
+      setMessages((current) => [
+        ...current,
+        assistantText("Here's your week:"),
+        { id: nextId('plan'), role: 'assistant', kind: 'plan', plan },
+        assistantText('Want a PDF? Use Export below, or Restart to plan again.'),
+      ]);
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Unable to generate meal plan.',
-      );
+      const message =
+        err instanceof Error ? err.message : 'Unable to generate meal plan.';
+      setError(message);
+      setMessages((current) => [
+        ...current,
+        assistantText(`I couldn't finish that plan: ${message}`),
+        assistantText('Tap Restart to try again.'),
+      ]);
     } finally {
       setGenerating(false);
     }
   }
 
-  async function onExportPdf() {
-    if (!mealPlan) return;
+  function onSelectOption(option: string) {
+    if (generating || pending.type === 'none') return;
 
+    if (pending.type === 'diet') {
+      const selected = option as DietOption;
+      setDiet(selected);
+      setMessages((current) => [
+        ...current,
+        userText(option),
+        assistantText(PLANNER_QUESTIONS[0].question),
+      ]);
+      setPending({ type: 'question', index: 0 });
+      return;
+    }
+
+    const question = PLANNER_QUESTIONS[pending.index];
+    if (!question) return;
+
+    const nextAnswers = [
+      ...answers,
+      { question: question.question, answer: option },
+    ];
+    setAnswers(nextAnswers);
+    setMessages((current) => [...current, userText(option)]);
+
+    const nextIndex = pending.index + 1;
+    if (nextIndex < PLANNER_QUESTIONS.length) {
+      setMessages((current) => [
+        ...current,
+        assistantText(PLANNER_QUESTIONS[nextIndex].question),
+      ]);
+      setPending({ type: 'question', index: nextIndex });
+      return;
+    }
+
+    const selectedDiet = diet ?? 'None';
+    void buildPlan(selectedDiet, nextAnswers);
+  }
+
+  function onRestart() {
+    messageSeq = 0;
+    setMessages([
+      assistantText(
+        `Hi — I'll build a 7-day meal plan starting today (${todayName}). First, any diet filter?`,
+      ),
+    ]);
+    setPending({ type: 'diet' });
+    setDiet(null);
+    setAnswers([]);
+    setMealPlan(null);
+    setGenerating(false);
+    setExporting(false);
+    setError(null);
+  }
+
+  async function onExportPdf() {
+    if (!mealPlan || !diet) return;
     setError(null);
     setExporting(true);
     try {
       await exportMealPlanPdf({
         plan: mealPlan,
         diet,
-        questions,
+        answers: [
+          { question: 'Dietary filter', answer: diet },
+          ...answers,
+        ],
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to export PDF.');
@@ -78,16 +204,13 @@ export default function PlannerScreen() {
   }
 
   return (
-    <ScrollView
-      style={styles.flex}
-      contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled"
-    >
-      <Text style={styles.heading}>Plan your week</Text>
-      <Text style={styles.subheading}>
-        Answer a short preference quiz and Gemini will draft a 7-day meal plan
-        starting {startDays[0]}.
-      </Text>
+    <View style={styles.flex}>
+      <View style={styles.header}>
+        <Text style={styles.heading}>Meal plan chat</Text>
+        <Text style={styles.subheading}>
+          Starts {todayName} · tap an option to answer
+        </Text>
+      </View>
 
       {!isGeminiConfigured ? (
         <Text style={styles.notice}>
@@ -95,69 +218,91 @@ export default function PlannerScreen() {
         </Text>
       ) : null}
 
-      <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>Diet filter</Text>
-        <OptionChips
-          label="Diet"
-          options={DIET_OPTIONS}
-          value={diet}
-          onChange={setDiet}
-        />
-      </View>
+      <ScrollView
+        ref={scrollRef}
+        style={styles.flex}
+        contentContainerStyle={styles.chatContent}
+        keyboardShouldPersistTaps="handled"
+      >
+        {messages.map((message) => {
+          if (message.kind === 'plan') {
+            return (
+              <View key={message.id} style={styles.assistantBlock}>
+                <MealPlanCard plan={message.plan} />
+              </View>
+            );
+          }
 
-      <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>Preferences</Text>
-        {questions.map((question, index) => (
-          <OptionChips
-            key={question.question}
-            label={`${index + 1}. ${question.question}`}
-            options={question.options}
-            value={question.answer}
-            onChange={(answer) => setAnswer(index, answer)}
-          />
-        ))}
-      </View>
+          const isUser = message.role === 'user';
+          return (
+            <View
+              key={message.id}
+              style={[styles.bubbleRow, isUser && styles.bubbleRowUser]}
+            >
+              <View style={[styles.bubble, isUser ? styles.userBubble : styles.assistantBubble]}>
+                <Text style={[styles.bubbleText, isUser && styles.userBubbleText]}>
+                  {message.text}
+                </Text>
+              </View>
+            </View>
+          );
+        })}
+
+        {generating ? (
+          <View style={styles.bubbleRow}>
+            <View style={[styles.bubble, styles.assistantBubble, styles.typing]}>
+              <ActivityIndicator color={colors.text} />
+              <Text style={styles.bubbleText}>Drafting your plan…</Text>
+            </View>
+          </View>
+        ) : null}
+      </ScrollView>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      <Pressable
-        style={[
-          styles.button,
-          (!isGeminiConfigured || generating) && styles.buttonDisabled,
-        ]}
-        disabled={!isGeminiConfigured || generating}
-        onPress={onGenerate}
-      >
-        {generating ? (
-          <View style={styles.buttonRow}>
-            <ActivityIndicator color={colors.buttonPrimaryText} />
-            <Text style={styles.buttonText}>Generating plan…</Text>
-          </View>
-        ) : (
-          <Text style={styles.buttonText}>Generate Meal Plan</Text>
-        )}
-      </Pressable>
-
-      {mealPlan ? (
-        <View style={styles.results}>
-          <View style={styles.resultsHeader}>
-            <Text style={styles.resultsTitle}>7-Day Meal Plan</Text>
-            <Pressable
-              style={[styles.secondaryButton, exporting && styles.buttonDisabled]}
-              disabled={exporting}
-              onPress={onExportPdf}
-            >
-              {exporting ? (
-                <ActivityIndicator color={colors.text} />
-              ) : (
-                <Text style={styles.secondaryButtonText}>Export PDF</Text>
-              )}
-            </Pressable>
-          </View>
-          <MealPlanCard plan={mealPlan} />
+      {optionChoices && isGeminiConfigured ? (
+        <View style={styles.optionsBar}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.optionsRow}
+          >
+            {optionChoices.map((option) => (
+              <Pressable
+                key={option}
+                style={styles.optionChip}
+                onPress={() => onSelectOption(option)}
+              >
+                <Text style={styles.optionChipText}>{option}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
         </View>
       ) : null}
-    </ScrollView>
+
+      <View style={styles.footerActions}>
+        {mealPlan ? (
+          <Pressable
+            style={[styles.secondaryButton, exporting && styles.buttonDisabled]}
+            disabled={exporting}
+            onPress={onExportPdf}
+          >
+            {exporting ? (
+              <ActivityIndicator color={colors.text} />
+            ) : (
+              <Text style={styles.secondaryButtonText}>Export PDF</Text>
+            )}
+          </Pressable>
+        ) : null}
+        <Pressable
+          style={[styles.secondaryButton, generating && styles.buttonDisabled]}
+          disabled={generating}
+          onPress={onRestart}
+        >
+          <Text style={styles.secondaryButtonText}>Restart</Text>
+        </Pressable>
+      </View>
+    </View>
   );
 }
 
@@ -166,89 +311,108 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  content: {
-    padding: 20,
-    paddingBottom: 40,
+  header: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 8,
   },
   heading: {
     color: colors.text,
     fontSize: 24,
     fontWeight: '700',
-    marginBottom: 8,
+    marginBottom: 4,
   },
   subheading: {
     color: colors.textSecondary,
-    fontSize: 15,
-    lineHeight: 21,
-    marginBottom: 20,
+    fontSize: 14,
+    lineHeight: 20,
   },
   notice: {
     color: colors.textSecondary,
     backgroundColor: colors.surface,
     borderRadius: 10,
     padding: 12,
-    marginBottom: 16,
+    marginHorizontal: 20,
+    marginBottom: 8,
     lineHeight: 20,
   },
-  sectionCard: {
+  chatContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    gap: 10,
+  },
+  bubbleRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+  },
+  bubbleRowUser: {
+    justifyContent: 'flex-end',
+  },
+  bubble: {
+    maxWidth: '82%',
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  assistantBubble: {
     backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 16,
+    borderTopLeftRadius: 6,
   },
-  sectionTitle: {
-    color: colors.text,
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 12,
-  },
-  error: {
-    color: '#FF6B6B',
-    marginBottom: 12,
-    lineHeight: 20,
-  },
-  button: {
+  userBubble: {
     backgroundColor: colors.buttonPrimaryBg,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 52,
+    borderTopRightRadius: 6,
   },
-  buttonDisabled: {
-    opacity: 0.5,
+  bubbleText: {
+    color: colors.text,
+    fontSize: 15,
+    lineHeight: 21,
   },
-  buttonRow: {
+  userBubbleText: {
+    color: colors.buttonPrimaryText,
+  },
+  typing: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
   },
-  buttonText: {
-    color: colors.buttonPrimaryText,
-    fontSize: 16,
-    fontWeight: '600',
+  assistantBlock: {
+    alignSelf: 'stretch',
   },
-  results: {
-    marginTop: 28,
+  optionsBar: {
+    borderTopColor: colors.border,
+    borderTopWidth: 1,
+    paddingVertical: 12,
+    backgroundColor: colors.background,
   },
-  resultsHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    marginBottom: 12,
+  optionsRow: {
+    paddingHorizontal: 16,
+    gap: 8,
   },
-  resultsTitle: {
+  optionChip: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  optionChipText: {
     color: colors.text,
-    fontSize: 18,
-    fontWeight: '600',
-    flex: 1,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  footerActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    paddingTop: 4,
   },
   secondaryButton: {
     backgroundColor: colors.surfaceElevated,
     borderRadius: 10,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     minHeight: 40,
     alignItems: 'center',
     justifyContent: 'center',
@@ -257,5 +421,14 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 14,
     fontWeight: '600',
+  },
+  buttonDisabled: {
+    opacity: 0.5,
+  },
+  error: {
+    color: '#FF6B6B',
+    paddingHorizontal: 20,
+    paddingBottom: 8,
+    lineHeight: 20,
   },
 });
