@@ -13,7 +13,22 @@ export default function AnalyzeLayout() {
         contentStyle: { backgroundColor: colors.background },
       }}
     >
-      <Stack.Screen name="confirm" options={{ title: 'Confirm photo' }} />
+      <Stack.Screen
+        name="index"
+        options={{
+          title: 'Analyze',
+          headerShown: false,
+          contentStyle: { backgroundColor: '#000000' },
+          animation: 'none',
+        }}
+      />
+      <Stack.Screen
+        name="confirm"
+        options={{
+          title: 'Confirm photo',
+          headerBackButtonDisplayMode: 'minimal',
+        }}
+      />
       <Stack.Screen
         name="processing"
         options={{

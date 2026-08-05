@@ -1,7 +1,6 @@
 import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -9,6 +8,7 @@ import {
   View,
 } from 'react-native';
 import { CameraView, useCameraPermissions, type CameraType } from 'expo-camera';
+import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -21,12 +21,12 @@ export type CapturedMealPhoto = {
 };
 
 type MealCameraProps = {
-  visible: boolean;
   onClose: () => void;
-  onCapture: (photo: CapturedMealPhoto) => void;
+  onCapture: (photo: CapturedMealPhoto, source: 'camera' | 'gallery') => void;
+  disabled?: boolean;
 };
 
-export function MealCamera({ visible, onClose, onCapture }: MealCameraProps) {
+export function MealCamera({ onClose, onCapture, disabled = false }: MealCameraProps) {
   const insets = useSafeAreaInsets();
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
@@ -34,23 +34,11 @@ export function MealCamera({ visible, onClose, onCapture }: MealCameraProps) {
   const [torch, setTorch] = useState(false);
   const [ready, setReady] = useState(false);
   const [capturing, setCapturing] = useState(false);
+  const [pickingGallery, setPickingGallery] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function resetSession() {
-    setError(null);
-    setCapturing(false);
-    setTorch(false);
-    setFacing('back');
-    setReady(false);
-  }
-
-  function handleClose() {
-    resetSession();
-    onClose();
-  }
-
   async function takePhoto() {
-    if (!cameraRef.current || !ready || capturing) return;
+    if (!cameraRef.current || !ready || capturing || disabled) return;
 
     setCapturing(true);
     setError(null);
@@ -68,14 +56,14 @@ export function MealCamera({ visible, onClose, onCapture }: MealCameraProps) {
         return;
       }
 
-      const captured: CapturedMealPhoto = {
-        uri: photo.uri,
-        base64: photo.base64,
-        mimeType: 'image/jpeg',
-      };
-
-      resetSession();
-      onCapture(captured);
+      onCapture(
+        {
+          uri: photo.uri,
+          base64: photo.base64,
+          mimeType: 'image/jpeg',
+        },
+        'camera',
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Camera capture failed.');
     } finally {
@@ -83,91 +71,156 @@ export function MealCamera({ visible, onClose, onCapture }: MealCameraProps) {
     }
   }
 
+  async function openGallery() {
+    if (disabled || pickingGallery || capturing) return;
+
+    setPickingGallery(true);
+    setError(null);
+
+    try {
+      const current = await ImagePicker.getMediaLibraryPermissionsAsync();
+      const result = current.granted
+        ? current
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!result.granted) {
+        setError('Photo library permission is required to choose an image.');
+        return;
+      }
+
+      const picked = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 0.7,
+        base64: true,
+        allowsEditing: true,
+        aspect: [4, 3],
+      });
+
+      if (picked.canceled || !picked.assets?.[0]) return;
+
+      const asset = picked.assets[0];
+      if (!asset.base64) {
+        setError('Could not read image data. Try another photo.');
+        return;
+      }
+
+      onCapture(
+        {
+          uri: asset.uri,
+          base64: asset.base64,
+          mimeType: asset.mimeType ?? 'image/jpeg',
+        },
+        'gallery',
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not open gallery.');
+    } finally {
+      setPickingGallery(false);
+    }
+  }
+
+  const busy = capturing || pickingGallery || disabled;
+
   return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="fullScreen"
-      onRequestClose={handleClose}
-    >
-      <View style={[styles.root, { paddingTop: insets.top }]}>
-        {!permission ? (
-          <View style={styles.center}>
-            <ActivityIndicator color={colors.text} />
-          </View>
-        ) : !permission.granted ? (
-          <View style={styles.center}>
-            <Ionicons name="camera-outline" size={40} color={colors.textMuted} />
-            <Text style={styles.permissionTitle}>Camera access needed</Text>
-            <Text style={styles.permissionBody}>
-              Allow camera access to photograph your meal for nutrition analysis.
-            </Text>
-            <Pressable style={styles.primaryButton} onPress={requestPermission}>
-              <Text style={styles.primaryButtonText}>Allow Camera</Text>
-            </Pressable>
-            <Pressable style={styles.textButton} onPress={handleClose}>
-              <Text style={styles.textButtonLabel}>Cancel</Text>
-            </Pressable>
-          </View>
-        ) : (
-          <View style={styles.flex}>
-            <CameraView
-              ref={cameraRef}
-              style={StyleSheet.absoluteFill}
-              facing={facing}
-              enableTorch={torch && facing === 'back'}
-              mode="picture"
-              onCameraReady={() => setReady(true)}
-            />
+    <View style={styles.root}>
+      {!permission ? (
+        <View style={[styles.center, { paddingTop: insets.top }]}>
+          <ActivityIndicator color={colors.text} />
+        </View>
+      ) : !permission.granted ? (
+        <View style={[styles.center, { paddingTop: insets.top }]}>
+          <Pressable
+            style={[styles.iconButton, styles.permissionBack, { top: insets.top + 4 }]}
+            onPress={onClose}
+            accessibilityLabel="Go back"
+          >
+            <Ionicons name="chevron-back" size={24} color={colors.text} style={styles.backIcon} />
+          </Pressable>
+          <Ionicons name="camera-outline" size={40} color={colors.textMuted} />
+          <Text style={styles.permissionTitle}>Camera access needed</Text>
+          <Text style={styles.permissionBody}>
+            Allow camera access to photograph your meal for nutrition analysis.
+          </Text>
+          <Pressable style={styles.primaryButton} onPress={requestPermission}>
+            <Text style={styles.primaryButtonText}>Allow Camera</Text>
+          </Pressable>
+          <Pressable style={styles.textButton} onPress={onClose}>
+            <Text style={styles.textButtonLabel}>Cancel</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <View style={styles.flex}>
+          <CameraView
+            ref={cameraRef}
+            style={StyleSheet.absoluteFill}
+            facing={facing}
+            enableTorch={torch && facing === 'back'}
+            mode="picture"
+            onCameraReady={() => setReady(true)}
+          />
 
-            <View style={styles.frameGuide} pointerEvents="none">
-              <View style={styles.frameCornerTL} />
-              <View style={styles.frameCornerTR} />
-              <View style={styles.frameCornerBL} />
-              <View style={styles.frameCornerBR} />
-              <Text style={styles.frameHint}>Center the meal in the frame</Text>
-            </View>
+          <View style={styles.frameGuide} pointerEvents="none">
+            <View style={styles.frameCornerTL} />
+            <View style={styles.frameCornerTR} />
+            <View style={styles.frameCornerBL} />
+            <View style={styles.frameCornerBR} />
+            <Text style={styles.frameHint}>Center the meal in the frame</Text>
+          </View>
 
-            <View style={[styles.topBar, { top: insets.top + 8 }]}>
-              <Pressable
-                style={styles.iconButton}
-                onPress={handleClose}
-                accessibilityLabel="Close camera"
-              >
-                <Ionicons name="close" size={24} color={colors.text} />
-              </Pressable>
-              <View style={styles.topActions}>
-                {facing === 'back' ? (
-                  <Pressable
-                    style={styles.iconButton}
-                    onPress={() => setTorch((value) => !value)}
-                    accessibilityLabel={torch ? 'Turn torch off' : 'Turn torch on'}
-                  >
-                    <Ionicons
-                      name={torch ? 'flash' : 'flash-outline'}
-                      size={22}
-                      color={colors.text}
-                    />
-                  </Pressable>
-                ) : null}
+          <View style={[styles.topBar, { top: Math.max(insets.top, 4) }]}>
+            <Pressable
+              style={styles.iconButton}
+              onPress={onClose}
+              accessibilityLabel="Go back"
+            >
+              <Ionicons
+                name="chevron-back"
+                size={24}
+                color={colors.text}
+                style={styles.backIcon}
+              />
+            </Pressable>
+            <View style={styles.topActions}>
+              {facing === 'back' ? (
                 <Pressable
                   style={styles.iconButton}
-                  onPress={() => {
-                    setTorch(false);
-                    setFacing((current) => (current === 'back' ? 'front' : 'back'));
-                  }}
-                  accessibilityLabel="Flip camera"
+                  onPress={() => setTorch((value) => !value)}
+                  accessibilityLabel={torch ? 'Turn torch off' : 'Turn torch on'}
                 >
-                  <Ionicons name="camera-reverse-outline" size={22} color={colors.text} />
+                  <Ionicons
+                    name={torch ? 'flash' : 'flash-outline'}
+                    size={22}
+                    color={colors.text}
+                  />
                 </Pressable>
-              </View>
-            </View>
-
-            <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 24) }]}>
-              {error ? <Text style={styles.error}>{error}</Text> : null}
+              ) : null}
               <Pressable
-                style={[styles.shutter, (!ready || capturing) && styles.shutterDisabled]}
-                disabled={!ready || capturing}
+                style={styles.iconButton}
+                onPress={() => {
+                  setTorch(false);
+                  setFacing((current) => (current === 'back' ? 'front' : 'back'));
+                }}
+                accessibilityLabel="Flip camera"
+              >
+                <Ionicons name="camera-reverse-outline" size={22} color={colors.text} />
+              </Pressable>
+            </View>
+          </View>
+
+          <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 24) }]}>
+            {error ? <Text style={styles.error}>{error}</Text> : null}
+            <View style={styles.controlsRow}>
+              <Pressable
+                style={[styles.galleryButton, busy && styles.shutterDisabled]}
+                disabled={busy}
+                onPress={openGallery}
+                accessibilityLabel="Open gallery"
+              >
+                <Ionicons name="images-outline" size={24} color={colors.text} />
+              </Pressable>
+
+              <Pressable
+                style={[styles.shutter, (!ready || busy) && styles.shutterDisabled]}
+                disabled={!ready || busy}
                 onPress={takePhoto}
                 accessibilityLabel="Take photo"
               >
@@ -177,11 +230,13 @@ export function MealCamera({ visible, onClose, onCapture }: MealCameraProps) {
                   <View style={styles.shutterInner} />
                 )}
               </Pressable>
+
+              <View style={styles.gallerySpacer} />
             </View>
           </View>
-        )}
-      </View>
-    </Modal>
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -202,6 +257,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 32,
     gap: 12,
+  },
+  permissionBack: {
+    position: 'absolute',
+    top: 8,
+    left: 16,
   },
   permissionTitle: {
     color: colors.text,
@@ -236,6 +296,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.45)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  backIcon: {
+    // Ionicons chevron-back sits left of center in its glyph box.
+    transform: [{ translateX: 2 }],
   },
   frameGuide: {
     position: 'absolute',
@@ -303,6 +367,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     paddingTop: 16,
+    paddingHorizontal: 28,
+  },
+  controlsRow: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  galleryButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gallerySpacer: {
+    width: 48,
   },
   shutter: {
     width: 76,

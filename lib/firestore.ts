@@ -21,7 +21,10 @@ import type { NutritionInfo } from '@/types/nutrition';
 import type { Recipe } from '@/types/recipe';
 
 export type SavedRecipe = Recipe & { id: string };
-export type SavedNutrition = NutritionInfo & { id: string };
+export type SavedNutrition = NutritionInfo & {
+  id: string;
+  createdAt: number | null;
+};
 
 function requireDb() {
   if (!db) {
@@ -34,6 +37,27 @@ function requireDb() {
 
 function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : [];
+}
+
+function toMillis(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (
+    value &&
+    typeof value === 'object' &&
+    'toMillis' in value &&
+    typeof (value as { toMillis: () => number }).toMillis === 'function'
+  ) {
+    return (value as { toMillis: () => number }).toMillis();
+  }
+  if (
+    value &&
+    typeof value === 'object' &&
+    'seconds' in value &&
+    typeof (value as { seconds: number }).seconds === 'number'
+  ) {
+    return (value as { seconds: number }).seconds * 1000;
+  }
+  return null;
 }
 
 function parseRecipe(id: string, data: Record<string, unknown>): SavedRecipe | null {
@@ -74,6 +98,7 @@ function parseNutrition(
     healthScore: typeof data.healthScore === 'number' ? data.healthScore : 0,
     description: typeof data.description === 'string' ? data.description : '',
     nutritionTips: asStringArray(data.nutritionTips),
+    createdAt: toMillis(data.createdAt),
   };
 }
 
@@ -146,7 +171,11 @@ export async function saveNutritionAnalysis(
     nutritionTips: info.nutritionTips,
     createdAt: serverTimestamp(),
   });
-  await prependCachedAnalysis(uid, { ...info, id: ref.id });
+  await prependCachedAnalysis(uid, {
+    ...info,
+    id: ref.id,
+    createdAt: Date.now(),
+  });
   return ref.id;
 }
 
