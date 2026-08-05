@@ -7,17 +7,21 @@ AI-assisted recipe and meal planning for iOS, built with Expo.
 - **Expo** (React Native) — test on device with Expo Go
 - **TypeScript**
 - **Expo Router** — file-based navigation
+- **Firebase Auth** — email/password (configure via `.env`)
 
 ## Prerequisites
 
 - Node.js 22+
 - [Expo Go](https://expo.dev/go) on your iPhone
 - Same Wi‑Fi network as your Mac (or use tunnel mode)
+- A Firebase project with Email/Password auth enabled
 
 ## Getting started
 
 ```bash
 npm install
+cp .env.example .env
+# fill in EXPO_PUBLIC_FIREBASE_* values
 npm start
 ```
 
@@ -44,10 +48,13 @@ Useful scripts:
 
 ```
 app/           # Expo Router screens
-assets/        # Icons and splash
+components/    # Shared UI
+constants/     # Theme tokens
+context/       # Auth provider
+lib/           # Firebase client
 ref/           # Local Flutter reference (gitignored)
 ```
 
 ## Notes
 
-Firebase, Gemini, camera, voice, and PDF are intentionally not wired up yet — this branch is the app shell only.
+Gemini, camera, voice, and PDF are not wired up yet. Auth screens work once Firebase env vars are set.
