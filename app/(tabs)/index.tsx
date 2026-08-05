@@ -1,9 +1,9 @@
 import { PlaceholderScreen } from '@/components/PlaceholderScreen';
 
-export default function CalorieAIScreen() {
+export default function AnalyzeScreen() {
   return (
     <PlaceholderScreen
-      title="CalorieAI"
+      title="Analyze"
       description="Snap a meal photo to analyze nutrition. Gemini integration comes next."
     />
   );
