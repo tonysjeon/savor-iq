@@ -112,7 +112,7 @@ export default function PlannerScreen() {
         ...current,
         assistantText("Here's your week:"),
         { id: nextId('plan'), role: 'assistant', kind: 'plan', plan },
-        assistantText('Want a PDF? Use Export below, or Restart to plan again.'),
+        assistantText('Want a PDF? Use Export at the top, or Restart to plan again.'),
       ]);
     } catch (err) {
       const message =
