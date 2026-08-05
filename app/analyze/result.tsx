@@ -15,7 +15,7 @@ export default function AnalyzeResultScreen() {
   const navigation = useNavigation();
   const [session, setSession] = useState<AnalyzeSession | null>(null);
 
-  function close() {
+  function done() {
     clearAnalyzeSession();
     router.replace('/(tabs)');
   }
@@ -23,18 +23,8 @@ export default function AnalyzeResultScreen() {
   useLayoutEffect(() => {
     navigation.setOptions({
       headerBackVisible: false,
-      gestureEnabled: true,
-      headerRight: () => (
-        <Pressable
-          onPress={close}
-          hitSlop={12}
-          accessibilityRole="button"
-          accessibilityLabel="Close results"
-          style={styles.closeButton}
-        >
-          <Ionicons name="close" size={24} color={colors.text} />
-        </Pressable>
-      ),
+      headerRight: () => null,
+      gestureEnabled: false,
     });
   }, [navigation]);
 
@@ -73,6 +63,11 @@ export default function AnalyzeResultScreen() {
       ) : null}
 
       <NutritionCard info={session.nutrition} />
+
+      <Pressable style={styles.primaryButton} onPress={done}>
+        <Ionicons name="checkmark" size={18} color={colors.buttonPrimaryText} />
+        <Text style={styles.primaryButtonText}>Done</Text>
+      </Pressable>
     </ScrollView>
   );
 }
@@ -98,8 +93,19 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
   },
-  closeButton: {
-    paddingHorizontal: 4,
-    paddingVertical: 4,
+  primaryButton: {
+    backgroundColor: colors.buttonPrimaryBg,
+    borderRadius: 12,
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
+  primaryButtonText: {
+    color: colors.buttonPrimaryText,
+    fontSize: 15,
+    fontWeight: '600',
   },
 });
