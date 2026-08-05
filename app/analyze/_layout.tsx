@@ -21,7 +21,6 @@ export default function AnalyzeLayout() {
         name="confirm"
         options={{
           title: 'Confirm photo',
-          headerBackTitleVisible: false,
           headerBackButtonDisplayMode: 'minimal',
         }}
       />
