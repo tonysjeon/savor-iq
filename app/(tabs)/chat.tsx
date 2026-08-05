@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -7,6 +7,8 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useNavigation } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 
 import { MealPlanCard } from '@/components/MealPlanCard';
 import { RecipeCard } from '@/components/RecipeCard';
@@ -381,18 +383,18 @@ export default function ChatScreen() {
   const typingLabel =
     mode === 'recipe' ? 'Drafting your recipe…' : 'Drafting your plan…';
 
-  return (
-    <View style={styles.flex}>
-      <View style={styles.header}>
-        <View style={styles.headerText}>
-          <Text style={styles.heading}>Chat</Text>
-        </View>
+  const navigation = useNavigation();
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
         <View style={styles.headerActions}>
           {mealPlan ? (
             <Pressable
               style={[styles.headerButton, exporting && styles.buttonDisabled]}
               disabled={exporting}
               onPress={onExportPdf}
+              accessibilityLabel="Export PDF"
             >
               {exporting ? (
                 <ActivityIndicator color={colors.text} />
@@ -402,15 +404,20 @@ export default function ChatScreen() {
             </Pressable>
           ) : null}
           <Pressable
-            style={[styles.headerButton, generating && styles.buttonDisabled]}
+            style={[styles.plusButton, generating && styles.buttonDisabled]}
             disabled={generating}
             onPress={onRestart}
+            accessibilityLabel="Start new chat"
           >
-            <Text style={styles.headerButtonText}>Restart</Text>
+            <Ionicons name="add" size={22} color={colors.text} />
           </Pressable>
         </View>
-      </View>
+      ),
+    });
+  }, [navigation, mealPlan, exporting, generating]);
 
+  return (
+    <View style={styles.flex}>
       {!isGeminiConfigured ? (
         <Text style={styles.notice}>
           Add EXPO_PUBLIC_GEMINI_API_KEY to your .env file, then restart Expo.
@@ -507,22 +514,11 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 8,
-  },
-  headerText: {
-    flex: 1,
-  },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    marginRight: 4,
   },
   headerButton: {
     backgroundColor: colors.surfaceElevated,
@@ -537,10 +533,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
-  heading: {
-    color: colors.text,
-    fontSize: 24,
-    fontWeight: '700',
+  plusButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.surfaceElevated,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   notice: {
     color: colors.textSecondary,
@@ -548,11 +547,13 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 12,
     marginHorizontal: 20,
+    marginTop: 8,
     marginBottom: 8,
     lineHeight: 20,
   },
   chatContent: {
     paddingHorizontal: 16,
+    paddingTop: 12,
     paddingBottom: 24,
     gap: 14,
   },
