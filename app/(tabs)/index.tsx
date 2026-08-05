@@ -12,7 +12,9 @@ import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 
 import { NutritionCard } from '@/components/NutritionCard';
+import { useAuth } from '@/context/AuthContext';
 import { colors } from '@/constants/theme';
+import { saveNutritionAnalysis } from '@/lib/firestore';
 import { analyzeNutritionFromImage, isGeminiConfigured } from '@/lib/gemini';
 import type { NutritionInfo } from '@/types/nutrition';
 
@@ -23,6 +25,7 @@ type PickedImage = {
 };
 
 export default function AnalyzeScreen() {
+  const { user } = useAuth();
   const [image, setImage] = useState<PickedImage | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -100,6 +103,18 @@ export default function AnalyzeScreen() {
     try {
       const info = await analyzeNutritionFromImage(picked.base64, mimeType);
       setNutrition(info);
+
+      if (user) {
+        try {
+          await saveNutritionAnalysis(user.uid, info);
+        } catch (cloudErr) {
+          setError(
+            cloudErr instanceof Error
+              ? `Analysis ready, but cloud save failed: ${cloudErr.message}`
+              : 'Analysis ready, but cloud save failed.',
+          );
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Analysis failed.');
     } finally {

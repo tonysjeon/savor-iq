@@ -1,13 +1,63 @@
 import { Link, Redirect } from 'expo-router';
-import { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useState } from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 
 import { useAuth } from '@/context/AuthContext';
 import { colors } from '@/constants/theme';
+import {
+  listNutritionAnalyses,
+  listRecipes,
+  type SavedNutrition,
+  type SavedRecipe,
+} from '@/lib/firestore';
 
 export default function ProfileScreen() {
   const { user, loading, signOut } = useAuth();
   const [signingOut, setSigningOut] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [recipes, setRecipes] = useState<SavedRecipe[]>([]);
+  const [analyses, setAnalyses] = useState<SavedNutrition[]>([]);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!user) return;
+
+      let active = true;
+      setLoadingHistory(true);
+      setHistoryError(null);
+
+      Promise.all([listRecipes(user.uid, 10), listNutritionAnalyses(user.uid, 10)])
+        .then(([nextRecipes, nextAnalyses]) => {
+          if (!active) return;
+          setRecipes(nextRecipes);
+          setAnalyses(nextAnalyses);
+        })
+        .catch((err) => {
+          if (!active) return;
+          setHistoryError(
+            err instanceof Error
+              ? err.message
+              : 'Could not load saved history from Firestore.',
+          );
+        })
+        .finally(() => {
+          if (active) setLoadingHistory(false);
+        });
+
+      return () => {
+        active = false;
+      };
+    }, [user]),
+  );
 
   if (!loading && !user) {
     return <Redirect href="/(auth)/login" />;
@@ -23,11 +73,53 @@ export default function ProfileScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.flex} contentContainerStyle={styles.content}>
       <Text style={styles.title}>Profile</Text>
       <Text style={styles.description}>
         {user?.displayName || user?.email || 'Signed in to Savor IQ'}
       </Text>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Saved recipes</Text>
+        {loadingHistory ? (
+          <ActivityIndicator color={colors.text} style={styles.loader} />
+        ) : recipes.length === 0 ? (
+          <Text style={styles.empty}>No cloud-saved recipes yet.</Text>
+        ) : (
+          recipes.map((recipe) => (
+            <View key={recipe.id} style={styles.item}>
+              <Text style={styles.itemTitle} numberOfLines={1}>
+                {recipe.title}
+              </Text>
+              <Text style={styles.itemMeta} numberOfLines={1}>
+                {recipe.preparationMethod} · Serves {recipe.servings}
+              </Text>
+            </View>
+          ))
+        )}
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Nutrition history</Text>
+        {loadingHistory ? (
+          <ActivityIndicator color={colors.text} style={styles.loader} />
+        ) : analyses.length === 0 ? (
+          <Text style={styles.empty}>No saved meal analyses yet.</Text>
+        ) : (
+          analyses.map((item) => (
+            <View key={item.id} style={styles.item}>
+              <Text style={styles.itemTitle} numberOfLines={1}>
+                {item.foodName}
+              </Text>
+              <Text style={styles.itemMeta} numberOfLines={1}>
+                {item.calories} kcal · Score {item.healthScore}/10
+              </Text>
+            </View>
+          ))
+        )}
+      </View>
+
+      {historyError ? <Text style={styles.error}>{historyError}</Text> : null}
 
       <Link href="/about" asChild>
         <Pressable style={styles.secondaryButton} accessibilityRole="button">
@@ -47,39 +139,80 @@ export default function ProfileScreen() {
           <Text style={styles.buttonText}>Sign out</Text>
         )}
       </Pressable>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  flex: {
     flex: 1,
     backgroundColor: colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
+  },
+  content: {
     paddingHorizontal: 24,
+    paddingTop: 24,
+    paddingBottom: 40,
   },
   title: {
     color: colors.text,
     fontSize: 28,
     fontWeight: '600',
     marginBottom: 10,
-    textAlign: 'center',
   },
   description: {
     color: colors.textSecondary,
     fontSize: 16,
     lineHeight: 22,
-    textAlign: 'center',
     marginBottom: 24,
+  },
+  section: {
+    marginBottom: 24,
+  },
+  sectionTitle: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
+  loader: {
+    marginVertical: 8,
+  },
+  empty: {
+    color: colors.textMuted,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  item: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+  },
+  itemTitle: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  itemMeta: {
+    color: colors.textMuted,
+    fontSize: 13,
+  },
+  error: {
+    color: '#FF6B6B',
+    marginBottom: 16,
+    lineHeight: 20,
   },
   button: {
     backgroundColor: colors.buttonPrimaryBg,
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderRadius: 10,
-    minWidth: 160,
+    minHeight: 48,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   buttonText: {
     color: colors.buttonPrimaryText,
@@ -92,7 +225,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 10,
     marginBottom: 12,
-    minWidth: 160,
     alignItems: 'center',
   },
   secondaryButtonText: {

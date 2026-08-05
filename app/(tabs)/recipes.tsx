@@ -13,7 +13,9 @@ import {
 
 import { OptionChips } from '@/components/OptionChips';
 import { RecipeCard } from '@/components/RecipeCard';
+import { useAuth } from '@/context/AuthContext';
 import { colors } from '@/constants/theme';
+import { listRecipes, saveRecipe } from '@/lib/firestore';
 import { generateRecipe, isGeminiConfigured } from '@/lib/gemini';
 import {
   loadRecentRecipes,
@@ -30,6 +32,7 @@ import {
 } from '@/types/recipe';
 
 export default function RecipesScreen() {
+  const { user } = useAuth();
   const [ingredients, setIngredients] = useState('');
   const [diet, setDiet] = useState<DietOption>('None');
   const [method, setMethod] = useState<PreparationMethod>('Any Method');
@@ -38,16 +41,37 @@ export default function RecipesScreen() {
   const [error, setError] = useState<string | null>(null);
   const [currentRecipe, setCurrentRecipe] = useState<Recipe | null>(null);
   const [recentRecipes, setRecentRecipes] = useState<Recipe[]>([]);
+  const [historySource, setHistorySource] = useState<'cloud' | 'local'>('local');
 
   useEffect(() => {
     let active = true;
-    loadRecentRecipes().then((recipes) => {
-      if (active) setRecentRecipes(recipes);
-    });
+
+    async function loadHistory() {
+      if (user) {
+        try {
+          const cloud = await listRecipes(user.uid, 10);
+          if (!active) return;
+          if (cloud.length > 0) {
+            setRecentRecipes(cloud);
+            setHistorySource('cloud');
+            return;
+          }
+        } catch {
+          // Fall back to device storage if Firestore isn't ready.
+        }
+      }
+
+      const local = await loadRecentRecipes();
+      if (!active) return;
+      setRecentRecipes(local);
+      setHistorySource('local');
+    }
+
+    loadHistory();
     return () => {
       active = false;
     };
-  }, []);
+  }, [user]);
 
   async function onGenerate() {
     const trimmed = ingredients.trim();
@@ -62,9 +86,23 @@ export default function RecipesScreen() {
     try {
       const recipe = await generateRecipe(trimmed, diet, method, servings);
       setCurrentRecipe(recipe);
+
       const next = prependRecentRecipe(recentRecipes, recipe);
       setRecentRecipes(next);
       await saveRecentRecipes(next);
+
+      if (user) {
+        try {
+          await saveRecipe(user.uid, recipe);
+          setHistorySource('cloud');
+        } catch (cloudErr) {
+          setError(
+            cloudErr instanceof Error
+              ? `Recipe ready, but cloud save failed: ${cloudErr.message}`
+              : 'Recipe ready, but cloud save failed.',
+          );
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to generate recipe.');
     } finally {
@@ -154,7 +192,9 @@ export default function RecipesScreen() {
 
         {recentRecipes.length > 0 ? (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Recent</Text>
+            <Text style={styles.sectionTitle}>
+              {historySource === 'cloud' ? 'Saved recipes' : 'Recent'}
+            </Text>
             {recentRecipes.map((recipe, index) => (
               <Pressable
                 key={`${recipe.title}-${index}`}

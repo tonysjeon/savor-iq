@@ -17,6 +17,7 @@ import {
 } from 'react';
 
 import { auth, isFirebaseConfigured } from '@/lib/firebase';
+import { saveUserProfile } from '@/lib/firestore';
 
 type AuthContextValue = {
   user: User | null;
@@ -57,8 +58,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error('Firebase is not configured. Add EXPO_PUBLIC_FIREBASE_* to your .env.');
     }
     const credential = await createUserWithEmailAndPassword(auth, email.trim(), password);
-    if (name.trim()) {
-      await updateProfile(credential.user, { displayName: name.trim() });
+    const displayName = name.trim();
+    if (displayName) {
+      await updateProfile(credential.user, { displayName });
+    }
+    try {
+      await saveUserProfile({
+        uid: credential.user.uid,
+        name: displayName,
+        email: email.trim(),
+      });
+    } catch {
+      // Profile doc is best-effort; auth account still succeeds.
     }
   }, []);
 
