@@ -6,19 +6,17 @@ import { MealCamera, type CapturedMealPhoto } from '@/components/MealCamera';
 import { colors } from '@/constants/theme';
 import { startAnalyzeSession } from '@/lib/analyzeSession';
 import { isGeminiConfigured } from '@/lib/gemini';
+import { useLeaveAnalyze } from '@/lib/leaveAnalyze';
 
 export default function AnalyzeScreen() {
   const [leaving, setLeaving] = useState(false);
+  const leaveAnalyze = useLeaveAnalyze();
 
   function handleClose() {
-    // Drop CameraView before the dismiss animation so it doesn't flash corners.
+    // Drop CameraView before dismiss so it doesn't flash corners.
     setLeaving(true);
     requestAnimationFrame(() => {
-      if (router.canGoBack()) {
-        router.back();
-      } else {
-        router.replace('/(tabs)');
-      }
+      leaveAnalyze();
     });
   }
 
