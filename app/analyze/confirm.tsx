@@ -4,26 +4,38 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useAuth } from '@/context/AuthContext';
 import { colors } from '@/constants/theme';
 import { getAnalyzeSession } from '@/lib/analyzeSession';
 import { isGeminiConfigured } from '@/lib/gemini';
+import { useLeaveAnalyze } from '@/lib/leaveAnalyze';
+import { enqueueMealAnalysis } from '@/lib/mealAnalysisQueue';
 
 export default function AnalyzeConfirmScreen() {
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
+  const leaveAnalyze = useLeaveAnalyze();
   const [uri, setUri] = useState<string | null>(null);
 
   useEffect(() => {
     const session = getAnalyzeSession();
     if (!session) {
-      router.replace('/(tabs)');
+      leaveAnalyze();
       return;
     }
     setUri(session.photo.uri);
-  }, []);
+  }, [leaveAnalyze]);
 
   function startAnalysis() {
-    if (!isGeminiConfigured) return;
-    router.replace('/analyze/processing');
+    const session = getAnalyzeSession();
+    if (!session || !isGeminiConfigured) return;
+
+    enqueueMealAnalysis({
+      photo: session.photo,
+      source: session.source,
+      userId: user?.uid ?? null,
+    });
+    leaveAnalyze();
   }
 
   function retake() {

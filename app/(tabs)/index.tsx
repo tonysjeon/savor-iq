@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Ellipse, Path } from 'react-native-svg';
 
 import { ProgressRing } from '@/components/ProgressRing';
+import { MealProcessingCard } from '@/components/MealProcessingCard';
 import { useAuth } from '@/context/AuthContext';
 import { colors } from '@/constants/theme';
 import {
@@ -24,9 +25,15 @@ import {
   type SavedNutrition,
 } from '@/lib/firestore';
 import {
+  listMealAnalysisJobs,
+  subscribeMealAnalysisJobs,
+  type MealAnalysisJob,
+} from '@/lib/mealAnalysisQueue';
+import {
   getHistoryCacheSync,
   loadHistoryCache,
   subscribeHistoryCache,
+  dedupeAnalyses,
 } from '@/lib/userHistoryCache';
 
 const WEEKDAY_LABELS = ['Su', 'M', 'Tu', 'W', 'Th', 'F', 'Sa'] as const;
@@ -142,6 +149,7 @@ export default function HomeScreen() {
   const today = useMemo(() => new Date(), []);
   const [selectedDay, setSelectedDay] = useState(() => today);
   const [analyses, setAnalyses] = useState<SavedNutrition[]>([]);
+  const [processingJobs, setProcessingJobs] = useState<MealAnalysisJob[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pagerPage, setPagerPage] = useState(0);
   const [showEaten, setShowEaten] = useState(false);
@@ -150,7 +158,7 @@ export default function HomeScreen() {
     setError(null);
     try {
       const next = await listNutritionAnalyses(uid, 100);
-      setAnalyses(next);
+      setAnalyses(dedupeAnalyses(next));
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Could not load meal history.',
@@ -161,7 +169,7 @@ export default function HomeScreen() {
   const applyCache = useCallback((uid: string) => {
     const syncCache = getHistoryCacheSync(uid);
     if (syncCache) {
-      setAnalyses(syncCache.analyses);
+      setAnalyses(dedupeAnalyses(syncCache.analyses));
     }
   }, []);
 
@@ -173,6 +181,13 @@ export default function HomeScreen() {
       applyCache(uid);
     });
   }, [user, applyCache]);
+
+  useEffect(() => {
+    setProcessingJobs(listMealAnalysisJobs());
+    return subscribeMealAnalysisJobs(() => {
+      setProcessingJobs(listMealAnalysisJobs());
+    });
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -188,7 +203,7 @@ export default function HomeScreen() {
         const disk = await loadHistoryCache(uid);
         if (!active) return;
         if (disk) {
-          setAnalyses(disk.analyses);
+          setAnalyses(dedupeAnalyses(disk.analyses));
         }
 
         await refreshFromNetwork(uid);
@@ -217,7 +232,14 @@ export default function HomeScreen() {
     () => sumForDay(analyses, selectedDay),
     [analyses, selectedDay],
   );
-  const recentMeals = useMemo(() => analyses.slice(0, 5), [analyses]);
+  const recentMeals = useMemo(
+    () =>
+      [...analyses]
+        .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+        .slice(0, Math.max(0, 5 - processingJobs.length)),
+    [analyses, processingJobs.length],
+  );
+  const hasRecentSection = processingJobs.length > 0 || recentMeals.length > 0;
 
   const caloriesLeft = Math.max(0, Math.round(DAILY_GOALS.calories - dayTotals.calories));
   const caloriesEaten = Math.round(dayTotals.calories);
@@ -569,7 +591,7 @@ export default function HomeScreen() {
 
           <Text style={styles.sectionTitle}>Recently uploaded</Text>
 
-          {recentMeals.length === 0 ? (
+          {!hasRecentSection ? (
             <View style={styles.emptyCard}>
               <View style={styles.emptyIllustration}>
                 <Ionicons name="restaurant-outline" size={36} color={colors.textMuted} />
@@ -583,7 +605,11 @@ export default function HomeScreen() {
               </Text>
             </View>
           ) : (
-            recentMeals.map((item) => {
+            <>
+              {processingJobs.map((job) => (
+                <MealProcessingCard key={job.id} job={job} />
+              ))}
+              {recentMeals.map((item) => {
               const timeLabel = formatMealTime(item.createdAt);
               return (
                 <View key={item.id} style={styles.mealCard}>
@@ -651,7 +677,8 @@ export default function HomeScreen() {
                   </View>
                 </View>
               );
-            })
+            })}
+            </>
           )}
 
       {error ? <Text style={styles.error}>{error}</Text> : null}

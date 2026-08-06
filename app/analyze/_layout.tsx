@@ -21,12 +21,14 @@ export default function AnalyzeLayout() {
       <Stack.Screen
         name="processing"
         options={{
+          animation: 'none',
           gestureEnabled: false,
         }}
       />
       <Stack.Screen
         name="result"
         options={{
+          animation: 'none',
           gestureEnabled: false,
         }}
       />
