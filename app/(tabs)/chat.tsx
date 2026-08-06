@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -7,8 +7,8 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useNavigation } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { MealPlanCard } from '@/components/MealPlanCard';
 import { RecipeCard } from '@/components/RecipeCard';
@@ -116,6 +116,7 @@ function openingMessages(): ChatMessage[] {
 
 export default function ChatScreen() {
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
   const startDays = weekdaysStartingFrom();
   const todayName = startDays[0];
@@ -383,41 +384,35 @@ export default function ChatScreen() {
   const typingLabel =
     mode === 'recipe' ? 'Drafting your recipe…' : 'Drafting your plan…';
 
-  const navigation = useNavigation();
-
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      headerRight: () => (
-        <View style={styles.headerActions}>
-          {mealPlan ? (
-            <Pressable
-              style={[styles.headerButton, exporting && styles.buttonDisabled]}
-              disabled={exporting}
-              onPress={onExportPdf}
-              accessibilityLabel="Export PDF"
-            >
-              {exporting ? (
-                <ActivityIndicator color={colors.text} />
-              ) : (
-                <Text style={styles.headerButtonText}>Export PDF</Text>
-              )}
-            </Pressable>
-          ) : null}
-          <Pressable
-            style={[styles.plusButton, generating && styles.buttonDisabled]}
-            disabled={generating}
-            onPress={onRestart}
-            accessibilityLabel="Start new chat"
-          >
-            <Ionicons name="add" size={22} color={colors.text} />
-          </Pressable>
-        </View>
-      ),
-    });
-  }, [navigation, mealPlan, exporting, generating]);
-
   return (
-    <View style={styles.flex}>
+    <View style={[styles.flex, { paddingTop: insets.top }]}>
+      <View style={styles.toolbar}>
+        {mealPlan ? (
+          <Pressable
+            style={[styles.headerButton, exporting && styles.buttonDisabled]}
+            disabled={exporting}
+            onPress={onExportPdf}
+            accessibilityLabel="Export PDF"
+          >
+            {exporting ? (
+              <ActivityIndicator color={colors.text} />
+            ) : (
+              <Text style={styles.headerButtonText}>Export PDF</Text>
+            )}
+          </Pressable>
+        ) : (
+          <View style={styles.toolbarSpacer} />
+        )}
+        <Pressable
+          style={[styles.plusButton, generating && styles.buttonDisabled]}
+          disabled={generating}
+          onPress={onRestart}
+          accessibilityLabel="Start new chat"
+        >
+          <Ionicons name="add" size={22} color={colors.text} />
+        </Pressable>
+      </View>
+
       {!isGeminiConfigured ? (
         <Text style={styles.notice}>
           Add EXPO_PUBLIC_GEMINI_API_KEY to your .env file, then restart Expo.
@@ -514,11 +509,16 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  headerActions: {
+  toolbar: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'flex-end',
     gap: 8,
-    marginRight: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  toolbarSpacer: {
+    flex: 1,
   },
   headerButton: {
     backgroundColor: colors.surfaceElevated,
@@ -547,13 +547,12 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 12,
     marginHorizontal: 20,
-    marginTop: 8,
     marginBottom: 8,
     lineHeight: 20,
   },
   chatContent: {
     paddingHorizontal: 16,
-    paddingTop: 12,
+    paddingTop: 4,
     paddingBottom: 24,
     gap: 14,
   },

@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/context/AuthContext';
 import { colors } from '@/constants/theme';
@@ -82,6 +83,7 @@ function sumMeals(meals: SavedNutrition[]) {
 
 export default function CalendarScreen() {
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
   const today = useMemo(() => new Date(), []);
   const [cursor, setCursor] = useState(
     () => new Date(today.getFullYear(), today.getMonth(), 1),
@@ -201,7 +203,10 @@ export default function CalendarScreen() {
     : null;
 
   return (
-    <ScrollView style={styles.flex} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.flex}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}
+    >
       <View style={styles.monthHeader}>
         <Pressable
           style={styles.monthNav}

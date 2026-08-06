@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/context/AuthContext';
 import { colors } from '@/constants/theme';
@@ -26,6 +27,7 @@ import {
 
 export default function ProfileScreen() {
   const { user, loading, signOut } = useAuth();
+  const insets = useSafeAreaInsets();
   const [signingOut, setSigningOut] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -126,7 +128,10 @@ export default function ProfileScreen() {
   }
 
   return (
-    <ScrollView style={styles.flex} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.flex}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + 24 }]}
+    >
       <View style={styles.titleRow}>
         <View style={styles.titleBlock}>
           <Text style={styles.title}>Profile</Text>
