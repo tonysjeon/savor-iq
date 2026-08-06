@@ -45,7 +45,7 @@ export function MealCamera({ onClose, onCapture, disabled = false }: MealCameraP
 
     try {
       const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.7,
+        quality: 0.45,
         base64: true,
         exif: false,
         shutterSound: Platform.OS === 'ios',
@@ -89,7 +89,7 @@ export function MealCamera({ onClose, onCapture, disabled = false }: MealCameraP
 
       const picked = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
-        quality: 0.7,
+        quality: 0.45,
         base64: true,
         allowsEditing: true,
         aspect: [4, 3],

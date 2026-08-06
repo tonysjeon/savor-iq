@@ -8,7 +8,10 @@ type HistoryCache = {
   updatedAt: number;
 };
 
+type HistoryListener = (uid: string) => void;
+
 const memory = new Map<string, HistoryCache>();
+const listeners = new Set<HistoryListener>();
 
 function storageKey(uid: string) {
   return `userHistory:${uid}`;
@@ -16,6 +19,18 @@ function storageKey(uid: string) {
 
 function emptyCache(): HistoryCache {
   return { recipes: [], analyses: [], updatedAt: 0 };
+}
+
+function notifyHistory(uid: string) {
+  listeners.forEach((listener) => listener(uid));
+}
+
+/** Subscribe to cache writes so Home macros update when a meal is saved. */
+export function subscribeHistoryCache(listener: HistoryListener): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 }
 
 export function getHistoryCacheSync(uid: string): HistoryCache | null {
@@ -56,6 +71,7 @@ export async function saveHistoryCache(
   } catch {
     // Memory cache still helps within the session.
   }
+  notifyHistory(uid);
   return merged;
 }
 
@@ -71,6 +87,19 @@ export async function setCachedAnalyses(
   analyses: SavedNutrition[],
 ): Promise<void> {
   await saveHistoryCache(uid, { analyses });
+}
+
+/** Keep in-flight local meals when a network list would otherwise wipe them. */
+export function mergeAnalysesWithPending(
+  network: SavedNutrition[],
+  existing: SavedNutrition[] | undefined,
+): SavedNutrition[] {
+  const pending = (existing ?? []).filter((item) => item.id.startsWith('pending-'));
+  if (pending.length === 0) return network;
+
+  const networkIds = new Set(network.map((item) => item.id));
+  const keepPending = pending.filter((item) => !networkIds.has(item.id));
+  return [...keepPending, ...network];
 }
 
 export async function prependCachedRecipe(
@@ -89,12 +118,15 @@ export async function prependCachedRecipe(
 export async function prependCachedAnalysis(
   uid: string,
   analysis: SavedNutrition,
-  max = 10,
+  max = 20,
 ): Promise<void> {
   const current = (await loadHistoryCache(uid)) ?? emptyCache();
+  const existing = analysis.id.startsWith('pending-')
+    ? current.analyses
+    : current.analyses.filter((item) => !item.id.startsWith('pending-'));
   const analyses = [
     analysis,
-    ...current.analyses.filter((item) => item.id !== analysis.id),
+    ...existing.filter((item) => item.id !== analysis.id),
   ].slice(0, max);
   await setCachedAnalyses(uid, analyses);
 }

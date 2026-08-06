@@ -9,13 +9,16 @@ import {
   serverTimestamp,
   setDoc,
 } from 'firebase/firestore';
+import { getDownloadURL, ref, uploadString } from 'firebase/storage';
 
-import { db } from '@/lib/firebase';
+import { db, storage } from '@/lib/firebase';
 import {
   prependCachedAnalysis,
   prependCachedRecipe,
   setCachedAnalyses,
   setCachedRecipes,
+  getHistoryCacheSync,
+  mergeAnalysesWithPending,
 } from '@/lib/userHistoryCache';
 import type { NutritionInfo } from '@/types/nutrition';
 import type { Recipe } from '@/types/recipe';
@@ -26,6 +29,11 @@ export type SavedNutrition = NutritionInfo & {
   createdAt: number | null;
 };
 
+export type SaveNutritionOptions = {
+  imageBase64?: string;
+  localImageUri?: string;
+};
+
 function requireDb() {
   if (!db) {
     throw new Error(
@@ -33,6 +41,20 @@ function requireDb() {
     );
   }
   return db;
+}
+
+async function uploadMealImage(uid: string, base64: string): Promise<string | null> {
+  if (!storage) return null;
+  try {
+    const path = `users/${uid}/meals/${Date.now()}.jpg`;
+    const objectRef = ref(storage, path);
+    await uploadString(objectRef, base64, 'base64', {
+      contentType: 'image/jpeg',
+    });
+    return await getDownloadURL(objectRef);
+  } catch {
+    return null;
+  }
 }
 
 function asStringArray(value: unknown): string[] {
@@ -98,7 +120,9 @@ function parseNutrition(
     healthScore: typeof data.healthScore === 'number' ? data.healthScore : 0,
     description: typeof data.description === 'string' ? data.description : '',
     nutritionTips: asStringArray(data.nutritionTips),
-    createdAt: toMillis(data.createdAt),
+    imageUrl: typeof data.imageUrl === 'string' ? data.imageUrl : undefined,
+    createdAt:
+      toMillis(data.createdAtMs) ?? toMillis(data.createdAt),
   };
 }
 
@@ -160,23 +184,40 @@ export async function listRecipes(
 export async function saveNutritionAnalysis(
   uid: string,
   info: NutritionInfo,
+  options: SaveNutritionOptions = {},
 ): Promise<string> {
   const firestore = requireDb();
-  const ref = await addDoc(collection(firestore, 'users', uid, 'analyses'), {
+
+  let imageUrl = options.localImageUri || info.imageUrl || '';
+  if (options.imageBase64) {
+    const uploaded = await uploadMealImage(uid, options.imageBase64);
+    if (uploaded) imageUrl = uploaded;
+  }
+
+  const createdAtMs = Date.now();
+  const payload = {
     foodName: info.foodName,
     calories: info.calories,
     macros: info.macros,
     healthScore: info.healthScore,
     description: info.description,
     nutritionTips: info.nutritionTips,
+    ...(imageUrl ? { imageUrl } : {}),
     createdAt: serverTimestamp(),
-  });
+    createdAtMs,
+  };
+
+  const docRef = await addDoc(
+    collection(firestore, 'users', uid, 'analyses'),
+    payload,
+  );
   await prependCachedAnalysis(uid, {
     ...info,
-    id: ref.id,
-    createdAt: Date.now(),
+    id: docRef.id,
+    imageUrl: imageUrl || undefined,
+    createdAt: createdAtMs,
   });
-  return ref.id;
+  return docRef.id;
 }
 
 export async function listNutritionAnalyses(
@@ -198,6 +239,8 @@ export async function listNutritionAnalyses(
     )
     .filter((item): item is SavedNutrition => item !== null);
 
-  await setCachedAnalyses(uid, analyses);
-  return analyses;
+  const existing = getHistoryCacheSync(uid)?.analyses;
+  const merged = mergeAnalysesWithPending(analyses, existing);
+  await setCachedAnalyses(uid, merged);
+  return merged;
 }

@@ -16,15 +16,18 @@ import { colors } from '@/constants/theme';
 import {
   getAnalyzeSession,
   setAnalyzeResult,
+  startAnalyzeSession,
 } from '@/lib/analyzeSession';
 import { saveNutritionAnalysis } from '@/lib/firestore';
 import { analyzeNutritionFromImage } from '@/lib/gemini';
+import { prepareMealPhotoForAnalysis } from '@/lib/mealPhoto';
+import { prependCachedAnalysis } from '@/lib/userHistoryCache';
 
 const STEPS = [
+  'Preparing photo…',
   'Detecting food…',
-  'Estimating portions…',
-  'Calculating macros…',
-  'Writing nutrition tips…',
+  'Estimating nutrition…',
+  'Finishing up…',
 ] as const;
 
 export default function AnalyzeProcessingScreen() {
@@ -45,12 +48,12 @@ export default function AnalyzeProcessingScreen() {
     }
 
     let active = true;
-    setPhotoUri(session.photo.uri);
+    const sourcePhoto = session.photo;
+    const source = session.source;
+    setPhotoUri(sourcePhoto.uri);
     setError(null);
     setStepIndex(0);
     progress.setValue(0);
-
-    const { base64, mimeType } = session.photo;
 
     const pulseLoop = Animated.loop(
       Animated.sequence([
@@ -71,26 +74,46 @@ export default function AnalyzeProcessingScreen() {
     pulseLoop.start();
 
     Animated.timing(progress, {
-      toValue: 0.85,
-      duration: 12000,
+      toValue: 0.9,
+      duration: 8000,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: false,
     }).start();
 
     const stepTimer = setInterval(() => {
       setStepIndex((current) => Math.min(current + 1, STEPS.length - 1));
-    }, 2200);
+    }, 1600);
 
     async function run() {
       try {
-        const info = await analyzeNutritionFromImage(base64, mimeType);
+        const prepared = await prepareMealPhotoForAnalysis(sourcePhoto);
+        if (!active) return;
+        startAnalyzeSession(prepared, source);
+        setPhotoUri(prepared.uri);
+
+        const info = await analyzeNutritionFromImage(
+          prepared.base64,
+          prepared.mimeType,
+        );
         if (!active) return;
 
-        setAnalyzeResult(info, null);
+        const saveWarning = !userId
+          ? 'Sign in to save this meal to your history.'
+          : null;
+        setAnalyzeResult(info, saveWarning);
+
+        if (userId) {
+          void prependCachedAnalysis(userId, {
+            ...info,
+            id: `pending-${Date.now()}`,
+            imageUrl: prepared.uri,
+            createdAt: Date.now(),
+          });
+        }
 
         Animated.timing(progress, {
           toValue: 1,
-          duration: 200,
+          duration: 180,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: false,
         }).start();
@@ -98,7 +121,10 @@ export default function AnalyzeProcessingScreen() {
         router.replace('/analyze/result');
 
         if (userId) {
-          void saveNutritionAnalysis(userId, info).catch((cloudErr) => {
+          void saveNutritionAnalysis(userId, info, {
+            imageBase64: prepared.base64,
+            localImageUri: prepared.uri,
+          }).catch((cloudErr) => {
             const warning =
               cloudErr instanceof Error
                 ? `Analysis ready, but cloud save failed: ${cloudErr.message}`
@@ -187,7 +213,7 @@ export default function AnalyzeProcessingScreen() {
             <View style={styles.barTrack}>
               <Animated.View style={[styles.barFill, { width: barWidth }]} />
             </View>
-            <Text style={styles.caption}>This usually takes a few seconds</Text>
+            <Text style={styles.caption}>Usually under 10 seconds</Text>
           </>
         )}
       </View>

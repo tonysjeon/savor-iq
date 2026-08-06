@@ -1,7 +1,7 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   Dimensions,
+  Image,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Pressable,
@@ -26,6 +26,7 @@ import {
 import {
   getHistoryCacheSync,
   loadHistoryCache,
+  subscribeHistoryCache,
 } from '@/lib/userHistoryCache';
 
 const WEEKDAY_LABELS = ['Su', 'M', 'Tu', 'W', 'Th', 'F', 'Sa'] as const;
@@ -67,15 +68,15 @@ function AvocadoIcon({ size }: { size: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" pointerEvents="none">
       <Path
-        d="M12 1.5c-2.4 0-4.3 1.9-4.7 4.4C6.7 9.5 6.2 13.2 6.8 16.2 7.4 19.4 9.5 21.5 12 21.5s4.6-2.1 5.2-5.3c.6-3 .1-6.7-.5-10.3C16.3 3.4 14.4 1.5 12 1.5z"
+        d="M12 1.8c-3.1 0-5.4 2.1-5.9 5C5.4 10.4 5 14.2 5.8 17.2 6.6 20.4 9.1 22.2 12 22.2s5.4-1.8 6.2-5c.8-3 .4-6.8-.3-10.4C17.4 3.9 15.1 1.8 12 1.8z"
         fill="#689F38"
       />
       <Path
-        d="M12 3.4c-1.6 0-2.9 1.3-3.2 3.1-.5 3-.9 6-.4 8.4.4 2.3 1.9 3.9 3.6 3.9s3.2-1.6 3.6-3.9c.5-2.4.1-5.4-.4-8.4C14.9 4.7 13.6 3.4 12 3.4z"
+        d="M12 3.6c-2.1 0-3.7 1.5-4.1 3.4-.7 3.2-1 6.4-.4 8.8.5 2.4 2.3 4 4.5 4s4-1.6 4.5-4c.6-2.4.3-5.6-.4-8.8C15.7 5.1 14.1 3.6 12 3.6z"
         fill="#C5E1A5"
       />
-      <Ellipse cx="12" cy="14.2" rx="2.8" ry="3.3" fill="#5D4037" />
-      <Ellipse cx="12.8" cy="13.2" rx="0.85" ry="1.05" fill="#A1887F" opacity={0.8} />
+      <Ellipse cx="12" cy="14.4" rx="3.4" ry="3.5" fill="#5D4037" />
+      <Ellipse cx="12.9" cy="13.3" rx="1" ry="1.15" fill="#A1887F" opacity={0.8} />
     </Svg>
   );
 }
@@ -127,10 +128,12 @@ function sumForDay(analyses: SavedNutrition[], day: Date) {
     );
 }
 
-function mealsForDay(analyses: SavedNutrition[], day: Date): SavedNutrition[] {
-  return analyses.filter(
-    (item) => item.createdAt != null && sameDay(new Date(item.createdAt), day),
-  );
+function formatMealTime(createdAt: number | null): string {
+  if (createdAt == null) return '';
+  return new Date(createdAt).toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }
 
 export default function HomeScreen() {
@@ -139,8 +142,6 @@ export default function HomeScreen() {
   const today = useMemo(() => new Date(), []);
   const [selectedDay, setSelectedDay] = useState(() => today);
   const [analyses, setAnalyses] = useState<SavedNutrition[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [hydrated, setHydrated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pagerPage, setPagerPage] = useState(0);
   const [showEaten, setShowEaten] = useState(false);
@@ -154,55 +155,61 @@ export default function HomeScreen() {
       setError(
         err instanceof Error ? err.message : 'Could not load meal history.',
       );
-    } finally {
-      setLoading(false);
     }
   }, []);
 
+  const applyCache = useCallback((uid: string) => {
+    const syncCache = getHistoryCacheSync(uid);
+    if (syncCache) {
+      setAnalyses(syncCache.analyses);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const uid = user.uid;
+    return subscribeHistoryCache((changedUid) => {
+      if (changedUid !== uid) return;
+      applyCache(uid);
+    });
+  }, [user, applyCache]);
+
   useFocusEffect(
     useCallback(() => {
-      if (!user) return;
+      if (!user) {
+        setAnalyses([]);
+        return;
+      }
       const uid = user.uid;
       let active = true;
 
-      const syncCache = getHistoryCacheSync(uid);
-      if (syncCache) {
-        setAnalyses(syncCache.analyses);
-        setLoading(false);
-        setHydrated(true);
-        return () => {
-          active = false;
-        };
-      }
-
-      if (hydrated) {
-        return () => {
-          active = false;
-        };
-      }
-
-      async function hydrate() {
-        setLoading(true);
+      async function load() {
+        applyCache(uid);
         const disk = await loadHistoryCache(uid);
         if (!active) return;
-
         if (disk) {
           setAnalyses(disk.analyses);
-          setLoading(false);
-          setHydrated(true);
-          return;
         }
 
         await refreshFromNetwork(uid);
-        if (active) setHydrated(true);
+        if (!active) return;
+        // Pick up any meal saved while the network request was in flight.
+        applyCache(uid);
       }
 
-      void hydrate();
+      void load();
+
+      const retry = setTimeout(() => {
+        if (!active) return;
+        applyCache(uid);
+        void refreshFromNetwork(uid);
+      }, 2000);
 
       return () => {
         active = false;
+        clearTimeout(retry);
       };
-    }, [user, hydrated, refreshFromNetwork]),
+    }, [user, refreshFromNetwork, applyCache]),
   );
 
   const days = useMemo(() => weekDaysAround(today), [today]);
@@ -210,10 +217,7 @@ export default function HomeScreen() {
     () => sumForDay(analyses, selectedDay),
     [analyses, selectedDay],
   );
-  const dayMeals = useMemo(
-    () => mealsForDay(analyses, selectedDay),
-    [analyses, selectedDay],
-  );
+  const recentMeals = useMemo(() => analyses.slice(0, 5), [analyses]);
 
   const caloriesLeft = Math.max(0, Math.round(DAILY_GOALS.calories - dayTotals.calories));
   const caloriesEaten = Math.round(dayTotals.calories);
@@ -271,10 +275,6 @@ export default function HomeScreen() {
         })}
       </View>
 
-      {loading ? (
-        <ActivityIndicator color={colors.text} style={styles.loader} />
-      ) : (
-        <>
           <View style={styles.pager}>
             <ScrollView
               horizontal
@@ -477,7 +477,7 @@ export default function HomeScreen() {
                         style={styles.macroRing}
                       >
                         <MaterialCommunityIcons
-                          name="leaf"
+                          name="food-apple"
                           size={18}
                           color="#81C784"
                         />
@@ -567,9 +567,9 @@ export default function HomeScreen() {
             </View>
           </View>
 
-          <Text style={styles.sectionTitle}>Recent meals</Text>
+          <Text style={styles.sectionTitle}>Recently uploaded</Text>
 
-          {dayMeals.length === 0 ? (
+          {recentMeals.length === 0 ? (
             <View style={styles.emptyCard}>
               <View style={styles.emptyIllustration}>
                 <Ionicons name="restaurant-outline" size={36} color={colors.textMuted} />
@@ -579,25 +579,80 @@ export default function HomeScreen() {
                 </View>
               </View>
               <Text style={styles.emptyBody}>
-                Tap + to add your first meal of the day.
+                Tap + to add your first meal.
               </Text>
             </View>
           ) : (
-            dayMeals.map((item) => (
-              <View key={item.id} style={styles.mealItem}>
-                <View style={styles.mealText}>
-                  <Text style={styles.mealTitle} numberOfLines={1}>
-                    {item.foodName}
-                  </Text>
-                  <Text style={styles.mealMeta} numberOfLines={1}>
-                    {item.calories} kcal · Score {item.healthScore}/10
-                  </Text>
+            recentMeals.map((item) => {
+              const timeLabel = formatMealTime(item.createdAt);
+              return (
+                <View key={item.id} style={styles.mealCard}>
+                  {item.imageUrl ? (
+                    <Image
+                      source={{ uri: item.imageUrl }}
+                      style={styles.mealThumb}
+                    />
+                  ) : (
+                    <View style={[styles.mealThumb, styles.mealThumbFallback]}>
+                      <Ionicons
+                        name="restaurant-outline"
+                        size={28}
+                        color={colors.textMuted}
+                      />
+                    </View>
+                  )}
+                  <View style={styles.mealBody}>
+                    <View style={styles.mealTitleRow}>
+                      <Text style={styles.mealTitle} numberOfLines={1}>
+                        {item.foodName}
+                      </Text>
+                      {timeLabel ? (
+                        <Text style={styles.mealTime}>{timeLabel}</Text>
+                      ) : null}
+                    </View>
+                    <View style={styles.mealCalorieRow}>
+                      <Ionicons name="flame" size={18} color={colors.text} />
+                      <Text style={styles.mealCalories}>
+                        {Math.round(item.calories)} calories
+                      </Text>
+                    </View>
+                    <View style={styles.mealMacroRow}>
+                      <View style={styles.mealMacro}>
+                        <MaterialCommunityIcons
+                          name="food-drumstick"
+                          size={16}
+                          color="#E57373"
+                        />
+                        <Text style={styles.mealMacroText}>
+                          {Math.round(item.macros.protein)}g
+                        </Text>
+                      </View>
+                      <View style={styles.mealMacro}>
+                        <MaterialCommunityIcons
+                          name="barley"
+                          size={16}
+                          color="#FFA726"
+                        />
+                        <Text style={styles.mealMacroText}>
+                          {Math.round(item.macros.carbs)}g
+                        </Text>
+                      </View>
+                      <View style={styles.mealMacro}>
+                        <MaterialCommunityIcons
+                          name="peanut"
+                          size={16}
+                          color="#66BB6A"
+                        />
+                        <Text style={styles.mealMacroText}>
+                          {Math.round(item.macros.fat)}g
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
                 </View>
-              </View>
-            ))
+              );
+            })
           )}
-        </>
-      )}
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </ScrollView>
@@ -670,9 +725,6 @@ const styles = StyleSheet.create({
   dayWeekdaySelected: {
     color: colors.text,
     fontWeight: '600',
-  },
-  loader: {
-    marginTop: 24,
   },
   calorieCard: {
     backgroundColor: colors.card,
@@ -851,23 +903,70 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
   },
-  mealItem: {
+  mealCard: {
     backgroundColor: colors.card,
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 10,
+    borderRadius: 18,
+    marginBottom: 12,
+    flexDirection: 'row',
+    overflow: 'hidden',
+    minHeight: 108,
   },
-  mealText: {
-    gap: 4,
+  mealThumb: {
+    width: 108,
+    height: 108,
+    backgroundColor: colors.surfaceElevated,
+  },
+  mealThumbFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mealBody: {
+    flex: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    justifyContent: 'center',
+    gap: 8,
+  },
+  mealTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   mealTitle: {
+    flex: 1,
     color: colors.text,
-    fontSize: 15,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: '700',
   },
-  mealMeta: {
+  mealTime: {
     color: colors.textMuted,
     fontSize: 13,
+    fontWeight: '500',
+  },
+  mealCalorieRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  mealCalories: {
+    color: colors.text,
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  mealMacroRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  mealMacro: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  mealMacroText: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '600',
   },
   error: {
     color: '#FF6B6B',

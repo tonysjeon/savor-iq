@@ -333,22 +333,9 @@ export async function analyzeNutritionFromImage(
     VISION_MODEL,
     [
       {
-        text: `Analyse the food in this image and return detailed nutritional information.
-Return ONLY valid JSON with this exact shape:
-{
-  "foodName": "name of the dish",
-  "calories": 350,
-  "macros": {
-    "protein": 25,
-    "carbs": 40,
-    "fat": 12,
-    "fiber": 5
-  },
-  "healthScore": 7,
-  "description": "Brief healthy description of this meal.",
-  "nutritionTips": ["Tip 1", "Tip 2"]
-}
-All quantities in grams except calories. Make educated estimates from what you see.`,
+        text: `Estimate nutrition for the food in this image. Return ONLY compact JSON:
+{"foodName":"string","calories":0,"macros":{"protein":0,"carbs":0,"fat":0,"fiber":0},"healthScore":0,"description":"one short sentence","nutritionTips":["short tip","short tip"]}
+Macros in grams. healthScore 0-10. Keep description and tips brief.`,
       },
       {
         inline_data: {
@@ -358,8 +345,8 @@ All quantities in grams except calories. Make educated estimates from what you s
       },
     ],
     {
-      temperature: 0.4,
-      maxOutputTokens: 4096,
+      temperature: 0.2,
+      maxOutputTokens: 768,
       responseMimeType: 'application/json',
       thinkingConfig: { thinkingBudget: 0 },
     },

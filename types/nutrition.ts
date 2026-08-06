@@ -12,4 +12,6 @@ export type NutritionInfo = {
   healthScore: number;
   description: string;
   nutritionTips: string[];
+  /** Local file URI or remote download URL for the meal photo. */
+  imageUrl?: string;
 };
