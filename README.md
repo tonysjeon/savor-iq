@@ -65,8 +65,8 @@ ref/           # Local Flutter reference (gitignored)
 
 - **Home** tab: today’s macros from analyzed meals + recent meal list. Analyze via the center **+** button.
 - **Analyze** (`+`): opens the camera directly (gallery in the corner) → confirm → processing → results. Saved to `users/{uid}/analyses`.
-- **Planner** tab: chat-style preference quiz → 7-day meal plan starting today, with PDF export.
-- **Recipes** tab: text ingredients → Gemini recipe. Saved to the signed-in user in Firestore (`users/{uid}/recipes`), with local recent fallback.
+- **Chat** tab: choose Meal plan or Recipe, answer with option chips, get a plan or recipe in-thread (PDF export for plans).
+- **Calendar** tab: month view of analyzed meals; select a day for macros and meal list.
 - **Profile** shows cloud recipe and nutrition history.
 - Auth screens work once Firebase env vars are set.
 - Voice input is not wired up yet.

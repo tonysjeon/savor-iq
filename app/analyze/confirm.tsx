@@ -1,14 +1,26 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
-import { router } from 'expo-router';
+import { router, useNavigation } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors } from '@/constants/theme';
 import { getAnalyzeSession } from '@/lib/analyzeSession';
 import { isGeminiConfigured } from '@/lib/gemini';
 
 export default function AnalyzeConfirmScreen() {
+  const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
   const [uri, setUri] = useState<string | null>(null);
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerBackVisible: true,
+      headerBackButtonDisplayMode: 'minimal',
+      headerRight: () => null,
+      gestureEnabled: true,
+    });
+  }, [navigation]);
 
   useEffect(() => {
     const session = getAnalyzeSession();
@@ -36,8 +48,13 @@ export default function AnalyzeConfirmScreen() {
     <View style={styles.flex}>
       <Image source={{ uri }} style={styles.photo} resizeMode="cover" />
 
-      <View style={styles.footer}>
-        <Text style={styles.hint}>Looks good? Continue to analyze, or retake.</Text>
+      <View
+        style={[
+          styles.footer,
+          { paddingBottom: Math.max(insets.bottom, 16) + 12 },
+        ]}
+      >
+        <Text style={styles.hint}>Looks good? Analyze this meal, or retake.</Text>
         <View style={styles.actions}>
           <Pressable style={styles.secondaryButton} onPress={retake}>
             <Ionicons name="refresh" size={18} color={colors.text} />
@@ -47,9 +64,10 @@ export default function AnalyzeConfirmScreen() {
             style={[styles.primaryButton, !isGeminiConfigured && styles.buttonDisabled]}
             disabled={!isGeminiConfigured}
             onPress={startAnalysis}
+            accessibilityLabel="Analyze meal"
           >
-            <Ionicons name="restaurant-outline" size={18} color={colors.buttonPrimaryText} />
-            <Text style={styles.primaryButtonText}>Analyze</Text>
+            <Ionicons name="arrow-forward" size={18} color={colors.buttonPrimaryText} />
+            <Text style={styles.primaryButtonText}>Next</Text>
           </Pressable>
         </View>
         {!isGeminiConfigured ? (
@@ -75,7 +93,6 @@ const styles = StyleSheet.create({
   footer: {
     paddingHorizontal: 20,
     paddingTop: 16,
-    paddingBottom: 28,
     gap: 14,
     borderTopWidth: 1,
     borderTopColor: colors.border,

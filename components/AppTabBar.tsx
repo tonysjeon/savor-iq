@@ -6,21 +6,24 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors } from '@/constants/theme';
 
-const LEFT_ROUTES = ['index', 'planner'] as const;
-const RIGHT_ROUTES = ['recipes', 'profile'] as const;
+const LEFT_ROUTES = ['index', 'chat'] as const;
+const RIGHT_ROUTES = ['calendar', 'profile'] as const;
 const ANALYZE_HREF = '/analyze' as Href;
 
-const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
-  index: 'home-outline',
-  planner: 'calendar-outline',
-  recipes: 'book-outline',
-  profile: 'person-outline',
+const ICONS: Record<
+  string,
+  { outline: keyof typeof Ionicons.glyphMap; filled: keyof typeof Ionicons.glyphMap }
+> = {
+  index: { outline: 'home-outline', filled: 'home' },
+  chat: { outline: 'chatbubble-ellipses-outline', filled: 'chatbubble-ellipses' },
+  calendar: { outline: 'calendar-outline', filled: 'calendar' },
+  profile: { outline: 'person-outline', filled: 'person' },
 };
 
 const LABELS: Record<string, string> = {
   index: 'Home',
-  planner: 'Planner',
-  recipes: 'Recipes',
+  chat: 'Chat',
+  calendar: 'Calendar',
   profile: 'Profile',
 };
 
@@ -36,7 +39,10 @@ function TabItem({
   onLongPress: () => void;
 }) {
   const color = focused ? colors.tabActive : colors.tabInactive;
-  const icon = ICONS[routeName] ?? 'ellipse-outline';
+  const icons = ICONS[routeName];
+  const icon = focused
+    ? (icons?.filled ?? 'ellipse')
+    : (icons?.outline ?? 'ellipse-outline');
 
   return (
     <Pressable

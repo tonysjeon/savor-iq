@@ -31,5 +31,19 @@ export const PREPARATION_METHODS = [
 
 export const SERVING_OPTIONS = [1, 2, 3, 4, 5, 6, 8, 10, 12] as const;
 
+export const INGREDIENT_PRESETS = [
+  'Chicken',
+  'Tofu',
+  'Eggs',
+  'Salmon',
+  'Pasta',
+  'Rice',
+  'Beans',
+  'Mixed vegetables',
+  'Leftover-friendly',
+] as const;
+
 export type DietOption = (typeof DIET_OPTIONS)[number];
 export type PreparationMethod = (typeof PREPARATION_METHODS)[number];
+export type IngredientPreset = (typeof INGREDIENT_PRESETS)[number];
+export type ServingOption = (typeof SERVING_OPTIONS)[number];
