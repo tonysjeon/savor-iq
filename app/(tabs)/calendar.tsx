@@ -86,7 +86,7 @@ export default function CalendarScreen() {
   const [cursor, setCursor] = useState(
     () => new Date(today.getFullYear(), today.getMonth(), 1),
   );
-  const [selected, setSelected] = useState<Date>(() => today);
+  const [selected, setSelected] = useState<Date | null>(() => today);
   const [analyses, setAnalyses] = useState<SavedNutrition[]>([]);
   const [loading, setLoading] = useState(false);
   const [hydrated, setHydrated] = useState(false);
@@ -170,7 +170,7 @@ export default function CalendarScreen() {
   }, [analyses, year, month]);
 
   const selectedMeals = useMemo(
-    () => mealsForDay(analyses, selected),
+    () => (selected ? mealsForDay(analyses, selected) : []),
     [analyses, selected],
   );
   const totals = useMemo(() => sumMeals(selectedMeals), [selectedMeals]);
@@ -184,20 +184,24 @@ export default function CalendarScreen() {
   ] as const;
 
   function shiftMonth(delta: number) {
-    setCursor((current) => new Date(current.getFullYear(), current.getMonth() + delta, 1));
+    const next = new Date(cursor.getFullYear(), cursor.getMonth() + delta, 1);
+    const isCurrentMonth =
+      next.getFullYear() === today.getFullYear() &&
+      next.getMonth() === today.getMonth();
+    setCursor(next);
+    setSelected(isCurrentMonth ? today : null);
   }
 
-  const selectedLabel = selected.toLocaleDateString(undefined, {
-    weekday: 'long',
-    month: 'short',
-    day: 'numeric',
-  });
+  const selectedLabel = selected
+    ? selected.toLocaleDateString(undefined, {
+        weekday: 'long',
+        month: 'short',
+        day: 'numeric',
+      })
+    : null;
 
   return (
     <ScrollView style={styles.flex} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>Calendar</Text>
-      <Text style={styles.subtitle}>Meals and macros by day</Text>
-
       <View style={styles.monthHeader}>
         <Pressable
           style={styles.monthNav}
@@ -235,7 +239,7 @@ export default function CalendarScreen() {
                   return <View key={`e-${weekIndex}-${dayIndex}`} style={styles.dayCell} />;
                 }
                 const key = startOfDay(day);
-                const isSelected = sameDay(day, selected);
+                const isSelected = selected != null && sameDay(day, selected);
                 const isToday = sameDay(day, today);
                 const hasMeals = daysWithMeals.has(key);
 
@@ -264,9 +268,7 @@ export default function CalendarScreen() {
                           isSelected && styles.dotSelected,
                         ]}
                       />
-                    ) : (
-                      <View style={styles.dotSpacer} />
-                    )}
+                    ) : null}
                   </Pressable>
                 );
               })}
@@ -275,53 +277,55 @@ export default function CalendarScreen() {
         </View>
       )}
 
-      <View style={styles.detail}>
-        <Text style={styles.detailTitle}>{selectedLabel}</Text>
+      {selected ? (
+        <View style={styles.detail}>
+          <Text style={styles.detailTitle}>{selectedLabel}</Text>
 
-        {selectedMeals.length === 0 ? (
-          <Text style={styles.empty}>No meals logged this day.</Text>
-        ) : (
-          <>
-            <Text style={styles.calories}>{Math.round(totals.calories)} kcal</Text>
-            <View style={styles.macroStack}>
-              {macros.map((macro) => (
-                <View key={macro.key} style={styles.macroRow}>
-                  <View style={styles.macroLabelRow}>
-                    <View style={[styles.macroDot, { backgroundColor: macro.color }]} />
-                    <Text style={styles.macroLabel}>{macro.label}</Text>
-                    <Text style={styles.macroValue}>
-                      {Math.round(macro.value)}g
-                    </Text>
+          {selectedMeals.length === 0 ? (
+            <Text style={styles.empty}>No meals logged this day.</Text>
+          ) : (
+            <>
+              <Text style={styles.calories}>{Math.round(totals.calories)} kcal</Text>
+              <View style={styles.macroStack}>
+                {macros.map((macro) => (
+                  <View key={macro.key} style={styles.macroRow}>
+                    <View style={styles.macroLabelRow}>
+                      <View style={[styles.macroDot, { backgroundColor: macro.color }]} />
+                      <Text style={styles.macroLabel}>{macro.label}</Text>
+                      <Text style={styles.macroValue}>
+                        {Math.round(macro.value)}g
+                      </Text>
+                    </View>
+                    <View style={styles.barTrack}>
+                      <View
+                        style={[
+                          styles.barFill,
+                          {
+                            backgroundColor: macro.color,
+                            width: `${Math.min(100, (macro.value / macroTotal) * 100)}%`,
+                          },
+                        ]}
+                      />
+                    </View>
                   </View>
-                  <View style={styles.barTrack}>
-                    <View
-                      style={[
-                        styles.barFill,
-                        {
-                          backgroundColor: macro.color,
-                          width: `${Math.min(100, (macro.value / macroTotal) * 100)}%`,
-                        },
-                      ]}
-                    />
-                  </View>
+                ))}
+              </View>
+
+              <Text style={styles.mealsHeading}>Meals</Text>
+              {selectedMeals.map((item) => (
+                <View key={item.id} style={styles.mealItem}>
+                  <Text style={styles.mealTitle} numberOfLines={1}>
+                    {item.foodName}
+                  </Text>
+                  <Text style={styles.mealMeta}>
+                    {item.calories} kcal · Score {item.healthScore}/10
+                  </Text>
                 </View>
               ))}
-            </View>
-
-            <Text style={styles.mealsHeading}>Meals</Text>
-            {selectedMeals.map((item) => (
-              <View key={item.id} style={styles.mealItem}>
-                <Text style={styles.mealTitle} numberOfLines={1}>
-                  {item.foodName}
-                </Text>
-                <Text style={styles.mealMeta}>
-                  {item.calories} kcal · Score {item.healthScore}/10
-                </Text>
-              </View>
-            ))}
-          </>
-        )}
-      </View>
+            </>
+          )}
+        </View>
+      ) : null}
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </ScrollView>
@@ -337,17 +341,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 12,
     paddingBottom: 40,
-  },
-  title: {
-    color: colors.text,
-    fontSize: 28,
-    fontWeight: '700',
-    marginBottom: 6,
-  },
-  subtitle: {
-    color: colors.textSecondary,
-    fontSize: 15,
-    marginBottom: 20,
   },
   monthHeader: {
     flexDirection: 'row',
@@ -388,6 +381,7 @@ const styles = StyleSheet.create({
   },
   weekRow: {
     flexDirection: 'row',
+    gap: 4,
   },
   dayCell: {
     flex: 1,
@@ -395,7 +389,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 12,
-    gap: 3,
+    position: 'relative',
   },
   daySelected: {
     backgroundColor: colors.buttonPrimaryBg,
@@ -408,12 +402,15 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 15,
     fontWeight: '500',
+    textAlign: 'center',
   },
   dayNumberSelected: {
     color: colors.buttonPrimaryText,
     fontWeight: '700',
   },
   dot: {
+    position: 'absolute',
+    bottom: 6,
     width: 5,
     height: 5,
     borderRadius: 2.5,
@@ -421,10 +418,6 @@ const styles = StyleSheet.create({
   },
   dotSelected: {
     backgroundColor: colors.buttonPrimaryText,
-  },
-  dotSpacer: {
-    width: 5,
-    height: 5,
   },
   detail: {
     backgroundColor: colors.surface,
