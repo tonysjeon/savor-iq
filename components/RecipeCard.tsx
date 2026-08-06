@@ -61,7 +61,7 @@ export function RecipeCard({ recipe }: RecipeCardProps) {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.card,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: colors.border,
@@ -70,7 +70,7 @@ const styles = StyleSheet.create({
   image: {
     width: '100%',
     aspectRatio: 16 / 9,
-    backgroundColor: colors.surfaceElevated,
+    backgroundColor: colors.surface,
   },
   imagePlaceholder: {
     alignItems: 'center',
@@ -92,7 +92,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   metaChip: {
-    backgroundColor: colors.surfaceElevated,
+    backgroundColor: colors.surface,
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 6,

@@ -24,14 +24,14 @@ export default function TabsLayout() {
     <Tabs
       tabBar={(props) => <AppTabBar {...props} />}
       screenOptions={{
-        headerStyle: { backgroundColor: colors.background },
-        headerTintColor: colors.text,
-        headerTitleStyle: { fontWeight: '600' },
-        headerShadowVisible: false,
+        headerShown: false,
         sceneStyle: { backgroundColor: colors.background },
       }}
     >
-      <Tabs.Screen name="index" options={{ title: 'Home' }} />
+      <Tabs.Screen
+        name="index"
+        options={{ title: 'Home', sceneStyle: { backgroundColor: colors.page } }}
+      />
       <Tabs.Screen name="chat" options={{ title: 'Chat' }} />
       <Tabs.Screen name="calendar" options={{ title: 'Calendar' }} />
       <Tabs.Screen name="profile" options={{ title: 'Profile' }} />

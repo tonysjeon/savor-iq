@@ -6,44 +6,27 @@ export default function AnalyzeLayout() {
   return (
     <Stack
       screenOptions={{
-        headerStyle: { backgroundColor: colors.background },
-        headerTintColor: colors.text,
-        headerTitleStyle: { fontWeight: '600' },
-        headerShadowVisible: false,
+        headerShown: false,
         contentStyle: { backgroundColor: colors.background },
       }}
     >
       <Stack.Screen
         name="index"
         options={{
-          title: 'Analyze',
-          headerShown: false,
           contentStyle: { backgroundColor: '#000000' },
           animation: 'none',
         }}
       />
-      <Stack.Screen
-        name="confirm"
-        options={{
-          title: 'Confirm photo',
-          headerBackButtonDisplayMode: 'minimal',
-          headerRight: () => null,
-        }}
-      />
+      <Stack.Screen name="confirm" />
       <Stack.Screen
         name="processing"
         options={{
-          title: 'Analyzing',
-          headerBackVisible: false,
-          headerRight: () => null,
           gestureEnabled: false,
         }}
       />
       <Stack.Screen
         name="result"
         options={{
-          title: 'Results',
-          headerBackVisible: false,
           gestureEnabled: false,
         }}
       />

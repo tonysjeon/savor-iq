@@ -1,10 +1,13 @@
 import { StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors } from '@/constants/theme';
 
 export default function AboutScreen() {
+  const insets = useSafeAreaInsets();
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top + 32 }]}>
       <Text style={styles.title}>Savor IQ</Text>
       <Text style={styles.version}>Version 1.0.0</Text>
       <Text style={styles.body}>
@@ -20,7 +23,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
     paddingHorizontal: 24,
-    paddingTop: 32,
   },
   title: {
     color: colors.text,

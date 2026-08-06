@@ -1,6 +1,6 @@
-import { useEffect, useLayoutEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
-import { router, useNavigation } from 'expo-router';
+import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -9,18 +9,8 @@ import { getAnalyzeSession } from '@/lib/analyzeSession';
 import { isGeminiConfigured } from '@/lib/gemini';
 
 export default function AnalyzeConfirmScreen() {
-  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const [uri, setUri] = useState<string | null>(null);
-
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      headerBackVisible: true,
-      headerBackButtonDisplayMode: 'minimal',
-      headerRight: () => null,
-      gestureEnabled: true,
-    });
-  }, [navigation]);
 
   useEffect(() => {
     const session = getAnalyzeSession();
@@ -88,57 +78,54 @@ const styles = StyleSheet.create({
   photo: {
     flex: 1,
     width: '100%',
-    backgroundColor: colors.surface,
+    backgroundColor: '#000',
   },
   footer: {
     paddingHorizontal: 20,
     paddingTop: 16,
     gap: 14,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
     backgroundColor: colors.background,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
   },
   hint: {
     color: colors.textSecondary,
     fontSize: 14,
-    textAlign: 'center',
     lineHeight: 20,
   },
   actions: {
     flexDirection: 'row',
     gap: 12,
   },
-  primaryButton: {
-    flex: 1,
-    backgroundColor: colors.buttonPrimaryBg,
-    borderRadius: 12,
-    minHeight: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 8,
-  },
-  primaryButtonText: {
-    color: colors.buttonPrimaryText,
-    fontSize: 15,
-    fontWeight: '600',
-  },
   secondaryButton: {
     flex: 1,
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: 12,
     minHeight: 48,
+    borderRadius: 12,
+    backgroundColor: colors.surfaceElevated,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    flexDirection: 'row',
     gap: 8,
   },
   secondaryButtonText: {
     color: colors.text,
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '600',
+  },
+  primaryButton: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 12,
+    backgroundColor: colors.buttonPrimaryBg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  primaryButtonText: {
+    color: colors.buttonPrimaryText,
+    fontSize: 16,
+    fontWeight: '700',
   },
   buttonDisabled: {
     opacity: 0.5,
@@ -147,6 +134,5 @@ const styles = StyleSheet.create({
     color: '#FF6B6B',
     fontSize: 13,
     lineHeight: 18,
-    textAlign: 'center',
   },
 });

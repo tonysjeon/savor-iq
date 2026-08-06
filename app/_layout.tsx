@@ -7,7 +7,7 @@ import { colors } from '@/constants/theme';
 export default function RootLayout() {
   return (
     <AuthProvider>
-      <StatusBar style="light" />
+      <StatusBar style="dark" />
       <Stack
         screenOptions={{
           headerStyle: { backgroundColor: colors.background },
@@ -29,7 +29,7 @@ export default function RootLayout() {
             contentStyle: { backgroundColor: '#000000' },
           }}
         />
-        <Stack.Screen name="about" options={{ title: 'About' }} />
+        <Stack.Screen name="about" options={{ headerShown: false }} />
       </Stack>
     </AuthProvider>
   );

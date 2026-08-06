@@ -1,7 +1,8 @@
-import { useEffect, useLayoutEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { router, useNavigation } from 'expo-router';
+import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { NutritionCard } from '@/components/NutritionCard';
 import { colors } from '@/constants/theme';
@@ -12,21 +13,13 @@ import {
 } from '@/lib/analyzeSession';
 
 export default function AnalyzeResultScreen() {
-  const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
   const [session, setSession] = useState<AnalyzeSession | null>(null);
 
   function done() {
     clearAnalyzeSession();
     router.replace('/(tabs)');
   }
-
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      headerBackVisible: false,
-      headerRight: () => null,
-      gestureEnabled: false,
-    });
-  }, [navigation]);
 
   useEffect(() => {
     const current = getAnalyzeSession();
@@ -53,7 +46,10 @@ export default function AnalyzeResultScreen() {
   return (
     <ScrollView
       style={styles.flex}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[
+        styles.content,
+        { paddingTop: insets.top + 20, paddingBottom: Math.max(insets.bottom, 16) + 24 },
+      ]}
       keyboardShouldPersistTaps="handled"
     >
       <Image source={{ uri: session.photo.uri }} style={styles.photo} />
@@ -78,8 +74,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   content: {
-    padding: 20,
-    paddingBottom: 40,
+    paddingHorizontal: 20,
     gap: 16,
   },
   photo: {
@@ -101,11 +96,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flexDirection: 'row',
     gap: 8,
-    marginTop: 8,
   },
   primaryButtonText: {
     color: colors.buttonPrimaryText,
-    fontSize: 15,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: '700',
   },
 });
