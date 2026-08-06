@@ -19,6 +19,7 @@ import {
   setCachedRecipes,
   getHistoryCacheSync,
   mergeAnalysesWithPending,
+  dedupeAnalyses,
 } from '@/lib/userHistoryCache';
 import type { NutritionInfo } from '@/types/nutrition';
 import type { Recipe } from '@/types/recipe';
@@ -240,7 +241,7 @@ export async function listNutritionAnalyses(
     .filter((item): item is SavedNutrition => item !== null);
 
   const existing = getHistoryCacheSync(uid)?.analyses;
-  const merged = mergeAnalysesWithPending(analyses, existing);
+  const merged = dedupeAnalyses(mergeAnalysesWithPending(analyses, existing));
   await setCachedAnalyses(uid, merged);
   return merged;
 }

@@ -89,7 +89,21 @@ export async function setCachedAnalyses(
   await saveHistoryCache(uid, { analyses });
 }
 
-/** Keep in-flight local meals when a network list would otherwise wipe them. */
+/** Stable-ish key so a local pending meal can match its cloud copy. */
+export function analysisFingerprint(item: SavedNutrition): string {
+  const minute =
+    item.createdAt != null ? Math.floor(item.createdAt / 60_000) : 'none';
+  return [
+    item.foodName.trim().toLowerCase(),
+    Math.round(item.calories),
+    Math.round(item.macros.protein),
+    Math.round(item.macros.carbs),
+    Math.round(item.macros.fat),
+    minute,
+  ].join('|');
+}
+
+/** Keep in-flight local meals only when the network list does not already include them. */
 export function mergeAnalysesWithPending(
   network: SavedNutrition[],
   existing: SavedNutrition[] | undefined,
@@ -97,9 +111,43 @@ export function mergeAnalysesWithPending(
   const pending = (existing ?? []).filter((item) => item.id.startsWith('pending-'));
   if (pending.length === 0) return network;
 
-  const networkIds = new Set(network.map((item) => item.id));
-  const keepPending = pending.filter((item) => !networkIds.has(item.id));
+  const networkFingerprints = new Set(network.map(analysisFingerprint));
+  const keepPending = pending.filter(
+    (item) => !networkFingerprints.has(analysisFingerprint(item)),
+  );
   return [...keepPending, ...network];
+}
+
+/** Drop accidental duplicate meals (pending+saved, or double cloud writes). */
+export function dedupeAnalyses(items: SavedNutrition[]): SavedNutrition[] {
+  const seenIds = new Set<string>();
+  const kept: SavedNutrition[] = [];
+
+  for (const item of items) {
+    if (seenIds.has(item.id)) continue;
+
+    const fp = analysisFingerprint(item);
+    const duplicateIndex = kept.findIndex((other) => {
+      if (analysisFingerprint(other) !== fp) return false;
+      if (item.createdAt == null || other.createdAt == null) return true;
+      return Math.abs(item.createdAt - other.createdAt) < 120_000;
+    });
+
+    if (duplicateIndex >= 0) {
+      const duplicate = kept[duplicateIndex];
+      // Prefer a real Firestore doc over a local pending placeholder.
+      if (duplicate.id.startsWith('pending-') && !item.id.startsWith('pending-')) {
+        kept[duplicateIndex] = item;
+        seenIds.add(item.id);
+      }
+      continue;
+    }
+
+    seenIds.add(item.id);
+    kept.push(item);
+  }
+
+  return kept;
 }
 
 export async function prependCachedRecipe(
