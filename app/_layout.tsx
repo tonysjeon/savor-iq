@@ -24,9 +24,10 @@ export default function RootLayout() {
           name="analyze"
           options={{
             headerShown: false,
-            presentation: 'fullScreenModal',
+            presentation: 'transparentModal',
             animation: 'slide_from_bottom',
-            contentStyle: { backgroundColor: '#000000' },
+            gestureEnabled: true,
+            contentStyle: { backgroundColor: 'transparent' },
           }}
         />
         <Stack.Screen name="about" options={{ headerShown: false }} />
