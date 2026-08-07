@@ -1,18 +1,19 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { router } from 'expo-router';
 
 import { MealCamera, type CapturedMealPhoto } from '@/components/MealCamera';
+import { useAuth } from '@/context/AuthContext';
 import { colors } from '@/constants/theme';
-import { startAnalyzeSession } from '@/lib/analyzeSession';
 import { isGeminiConfigured } from '@/lib/gemini';
 import { useLeaveAnalyze } from '@/lib/leaveAnalyze';
+import { enqueueMealAnalysis } from '@/lib/mealAnalysisQueue';
 
 export default function AnalyzeScreen() {
+  const { user } = useAuth();
   const [leaving, setLeaving] = useState(false);
   const leaveAnalyze = useLeaveAnalyze();
 
-  function handleClose() {
+  function dismissCamera() {
     // Drop CameraView before dismiss so it doesn't flash corners.
     setLeaving(true);
     requestAnimationFrame(() => {
@@ -20,10 +21,18 @@ export default function AnalyzeScreen() {
     });
   }
 
+  function handleClose() {
+    dismissCamera();
+  }
+
   function handleCapture(photo: CapturedMealPhoto, source: 'camera' | 'gallery') {
-    if (!isGeminiConfigured) return;
-    startAnalyzeSession(photo, source);
-    router.push('/analyze/confirm');
+    if (!isGeminiConfigured || leaving) return;
+    enqueueMealAnalysis({
+      photo,
+      source,
+      userId: user?.uid ?? null,
+    });
+    dismissCamera();
   }
 
   if (!isGeminiConfigured) {
@@ -44,7 +53,13 @@ export default function AnalyzeScreen() {
     return <View style={styles.cover} />;
   }
 
-  return <MealCamera onClose={handleClose} onCapture={handleCapture} />;
+  return (
+    <MealCamera
+      onClose={handleClose}
+      onCapture={handleCapture}
+      disabled={leaving}
+    />
+  );
 }
 
 const styles = StyleSheet.create({
