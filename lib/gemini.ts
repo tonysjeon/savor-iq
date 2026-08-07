@@ -278,18 +278,22 @@ function toNumber(value: unknown, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function fallbackNutrition(): NutritionInfo {
-  return {
-    foodName: 'Unknown Food',
-    calories: 250,
-    macros: { protein: 15, carbs: 30, fat: 10, fiber: 5 },
-    healthScore: 6,
-    description: 'Nutritional analysis could not be completed accurately.',
-    nutritionTips: [
-      'Eat a balanced diet with diverse food groups.',
-      'Consult a nutritionist for personalised advice.',
-    ],
-  };
+function isUnidentifiedFoodName(name: string): boolean {
+  const n = name.trim().toLowerCase();
+  if (!n) return true;
+  return (
+    n.includes('unknown') ||
+    n.includes('unidentified') ||
+    n.includes('unrecognizable') ||
+    n.includes('not identifiable') ||
+    n.includes('food not found') ||
+    n.includes('cannot identify') ||
+    n.includes("can't identify") ||
+    n.includes('no food') ||
+    n.includes('not food') ||
+    n === 'n/a' ||
+    n === 'none'
+  );
 }
 
 function parseNutrition(data: Record<string, unknown>): NutritionInfo {
@@ -302,11 +306,15 @@ function parseNutrition(data: Record<string, unknown>): NutritionInfo {
     ? data.nutritionTips.map(String)
     : [];
 
+  const foodName =
+    typeof data.foodName === 'string' ? data.foodName.trim() : '';
+
+  if (isUnidentifiedFoodName(foodName)) {
+    throw new FoodNotDetectedError();
+  }
+
   return {
-    foodName:
-      typeof data.foodName === 'string' && data.foodName.trim()
-        ? data.foodName
-        : 'Unknown Food',
+    foodName,
     calories: Math.round(toNumber(data.calories)),
     macros: {
       protein: toNumber(macrosRaw.protein),
@@ -321,33 +329,48 @@ function parseNutrition(data: Record<string, unknown>): NutritionInfo {
   };
 }
 
-export class NoFoodDetectedError extends Error {
-  readonly code = 'NO_FOOD_DETECTED' as const;
+export class FoodNotDetectedError extends Error {
+  readonly code = 'FOOD_NOT_DETECTED' as const;
 
   constructor() {
-    super('No food detected');
-    this.name = 'NoFoodDetectedError';
+    super('Food not detected');
+    this.name = 'FoodNotDetectedError';
   }
 }
 
-export function isNoFoodDetectedError(err: unknown): boolean {
+/** @deprecated Use FoodNotDetectedError */
+export class NoFoodDetectedError extends FoodNotDetectedError {}
+
+/** @deprecated Use FoodNotDetectedError */
+export class UnknownFoodDetectedError extends FoodNotDetectedError {}
+
+export function isFoodNotDetectedError(err: unknown): boolean {
   return (
-    err instanceof NoFoodDetectedError ||
+    err instanceof FoodNotDetectedError ||
     (err instanceof Error &&
-      (err.message === 'No food detected' ||
-        (err as { code?: string }).code === 'NO_FOOD_DETECTED'))
+      (err.message === 'Food not detected' ||
+        err.message === 'No food detected' ||
+        err.message === 'Food not found' ||
+        (err as { code?: string }).code === 'FOOD_NOT_DETECTED' ||
+        (err as { code?: string }).code === 'NO_FOOD_DETECTED' ||
+        (err as { code?: string }).code === 'UNKNOWN_FOOD_DETECTED'))
   );
 }
 
-function isNoFoodPayload(data: Record<string, unknown>): boolean {
-  if (data.noFoodDetected === true) return true;
+export const isNoFoodDetectedError = isFoodNotDetectedError;
+export const isUnknownFoodDetectedError = isFoodNotDetectedError;
+
+function isFoodNotDetectedPayload(data: Record<string, unknown>): boolean {
+  if (
+    data.foodNotDetected === true ||
+    data.noFoodDetected === true ||
+    data.unknownFoodDetected === true
+  ) {
+    return true;
+  }
   const name =
-    typeof data.foodName === 'string' ? data.foodName.trim().toLowerCase() : '';
-  return (
-    name === 'no food detected' ||
-    name === 'no food' ||
-    name === 'not food'
-  );
+    typeof data.foodName === 'string' ? data.foodName.trim() : '';
+  return isUnidentifiedFoodName(name);
 }
 
 export async function analyzeNutritionFromImage(
@@ -363,11 +386,11 @@ export async function analyzeNutritionFromImage(
     [
       {
         text: `Look at this image for edible food.
-If there is no clearly identifiable edible food (e.g. empty plate, electronics, scenery, people only), return ONLY:
-{"noFoodDetected":true}
+If there is no clearly identifiable edible food (empty plate, non-food objects, scenery, people only), OR food is visible but you cannot identify what it is, return ONLY:
+{"foodNotDetected":true}
 Otherwise estimate nutrition and return ONLY compact JSON:
-{"foodName":"string","calories":0,"macros":{"protein":0,"carbs":0,"fat":0,"fiber":0},"healthScore":0,"description":"one short sentence","nutritionTips":["short tip","short tip"]}
-Macros in grams. healthScore 0-10. Keep description and tips brief.`,
+{"foodName":"specific dish name","calories":0,"macros":{"protein":0,"carbs":0,"fat":0,"fiber":0},"healthScore":0,"description":"one short sentence","nutritionTips":["short tip","short tip"]}
+Use a specific foodName — never "unknown", "unidentified", or placeholder names. Macros in grams. healthScore 0-10. Keep description and tips brief.`,
       },
       {
         inline_data: {
@@ -387,13 +410,13 @@ Macros in grams. healthScore 0-10. Keep description and tips brief.`,
   const raw = stripJsonFences(extractText(response));
   try {
     const data = parseJsonObject(raw);
-    if (isNoFoodPayload(data)) {
-      throw new NoFoodDetectedError();
+    if (isFoodNotDetectedPayload(data)) {
+      throw new FoodNotDetectedError();
     }
     return parseNutrition(data);
   } catch (err) {
-    if (isNoFoodDetectedError(err)) throw err;
-    return fallbackNutrition();
+    if (isFoodNotDetectedError(err)) throw err;
+    throw new FoodNotDetectedError();
   }
 }
 

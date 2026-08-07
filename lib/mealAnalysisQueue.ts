@@ -6,13 +6,13 @@ import {
 } from '@/lib/firestore';
 import {
   analyzeNutritionFromImage,
-  isNoFoodDetectedError,
+  isFoodNotDetectedError,
 } from '@/lib/gemini';
 import { prepareMealPhotoForAnalysis } from '@/lib/mealPhoto';
 import { prependCachedAnalysis } from '@/lib/userHistoryCache';
 
 export type MealAnalysisJobStatus = 'processing' | 'ready' | 'error';
-export type MealAnalysisErrorKind = 'no_food' | 'generic';
+export type MealAnalysisErrorKind = 'food_not_detected' | 'generic';
 
 export type MealAnalysisJob = {
   id: string;
@@ -171,16 +171,16 @@ async function runJob(id: string): Promise<void> {
   } catch (err) {
     const current = jobs.get(id);
     if (!current) return;
-    const noFood = isNoFoodDetectedError(err);
+    const foodNotDetected = isFoodNotDetectedError(err);
     setJob({
       ...current,
       status: 'error',
-      error: noFood
-        ? 'No food detected'
+      error: foodNotDetected
+        ? 'Food not detected'
         : err instanceof Error
           ? err.message
           : 'Analysis failed.',
-      errorKind: noFood ? 'no_food' : 'generic',
+      errorKind: foodNotDetected ? 'food_not_detected' : 'generic',
       result: undefined,
     });
   } finally {
