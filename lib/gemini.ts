@@ -321,6 +321,35 @@ function parseNutrition(data: Record<string, unknown>): NutritionInfo {
   };
 }
 
+export class NoFoodDetectedError extends Error {
+  readonly code = 'NO_FOOD_DETECTED' as const;
+
+  constructor() {
+    super('No food detected');
+    this.name = 'NoFoodDetectedError';
+  }
+}
+
+export function isNoFoodDetectedError(err: unknown): boolean {
+  return (
+    err instanceof NoFoodDetectedError ||
+    (err instanceof Error &&
+      (err.message === 'No food detected' ||
+        (err as { code?: string }).code === 'NO_FOOD_DETECTED'))
+  );
+}
+
+function isNoFoodPayload(data: Record<string, unknown>): boolean {
+  if (data.noFoodDetected === true) return true;
+  const name =
+    typeof data.foodName === 'string' ? data.foodName.trim().toLowerCase() : '';
+  return (
+    name === 'no food detected' ||
+    name === 'no food' ||
+    name === 'not food'
+  );
+}
+
 export async function analyzeNutritionFromImage(
   base64: string,
   mimeType: string = 'image/jpeg',
@@ -333,7 +362,10 @@ export async function analyzeNutritionFromImage(
     VISION_MODEL,
     [
       {
-        text: `Estimate nutrition for the food in this image. Return ONLY compact JSON:
+        text: `Look at this image for edible food.
+If there is no clearly identifiable edible food (e.g. empty plate, electronics, scenery, people only), return ONLY:
+{"noFoodDetected":true}
+Otherwise estimate nutrition and return ONLY compact JSON:
 {"foodName":"string","calories":0,"macros":{"protein":0,"carbs":0,"fat":0,"fiber":0},"healthScore":0,"description":"one short sentence","nutritionTips":["short tip","short tip"]}
 Macros in grams. healthScore 0-10. Keep description and tips brief.`,
       },
@@ -355,8 +387,12 @@ Macros in grams. healthScore 0-10. Keep description and tips brief.`,
   const raw = stripJsonFences(extractText(response));
   try {
     const data = parseJsonObject(raw);
+    if (isNoFoodPayload(data)) {
+      throw new NoFoodDetectedError();
+    }
     return parseNutrition(data);
-  } catch {
+  } catch (err) {
+    if (isNoFoodDetectedError(err)) throw err;
     return fallbackNutrition();
   }
 }

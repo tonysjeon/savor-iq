@@ -4,11 +4,15 @@ import {
   saveNutritionAnalysis,
   type SavedNutrition,
 } from '@/lib/firestore';
-import { analyzeNutritionFromImage } from '@/lib/gemini';
+import {
+  analyzeNutritionFromImage,
+  isNoFoodDetectedError,
+} from '@/lib/gemini';
 import { prepareMealPhotoForAnalysis } from '@/lib/mealPhoto';
 import { prependCachedAnalysis } from '@/lib/userHistoryCache';
 
 export type MealAnalysisJobStatus = 'processing' | 'ready' | 'error';
+export type MealAnalysisErrorKind = 'no_food' | 'generic';
 
 export type MealAnalysisJob = {
   id: string;
@@ -18,6 +22,7 @@ export type MealAnalysisJob = {
   userId: string | null;
   createdAt: number;
   error?: string;
+  errorKind?: MealAnalysisErrorKind;
   /** Filled when analysis completes — same card flips from skeleton to this. */
   result?: SavedNutrition;
 };
@@ -76,7 +81,13 @@ async function runJob(id: string): Promise<void> {
   if (!job) return;
 
   running.add(id);
-  setJob({ ...job, status: 'processing', error: undefined, result: undefined });
+  setJob({
+    ...job,
+    status: 'processing',
+    error: undefined,
+    errorKind: undefined,
+    result: undefined,
+  });
 
   try {
     const latest = jobs.get(id) ?? job;
@@ -88,6 +99,7 @@ async function runJob(id: string): Promise<void> {
       photo: prepared,
       status: 'processing',
       error: undefined,
+      errorKind: undefined,
       result: undefined,
     });
 
@@ -101,54 +113,74 @@ async function runJob(id: string): Promise<void> {
     const imageUrl = prepared.uri;
     const createdAtMs = Date.now();
 
-    let result: SavedNutrition;
-    if (userId) {
-      const docId = await saveNutritionAnalysis(userId, info, {
-        imageBase64: prepared.base64,
-        localImageUri: prepared.uri,
-        skipCache: true,
-      });
-      result = {
-        ...info,
-        id: docId,
-        imageUrl,
-        createdAt: createdAtMs,
-      };
-    } else {
-      result = {
-        ...info,
-        id,
-        imageUrl,
-        createdAt: createdAtMs,
-      };
-    }
-
-    if (!jobs.has(id)) return;
-
-    // Flip this same card to the completed meal before history updates.
+    // Fill the same card immediately; persist in the background after.
+    const provisional: SavedNutrition = {
+      ...info,
+      id,
+      imageUrl,
+      createdAt: createdAtMs,
+    };
     setJob({
       ...(jobs.get(id) ?? latest),
       photo: prepared,
       status: 'ready',
       error: undefined,
-      result: {
-        ...result,
-        imageUrl: result.imageUrl || prepared.uri,
-      },
+      errorKind: undefined,
+      result: provisional,
     });
 
-    if (userId) {
-      await prependCachedAnalysis(userId, {
-        ...result,
-        imageUrl: result.imageUrl || prepared.uri,
+    if (!userId) return;
+
+    try {
+      const docId = await saveNutritionAnalysis(userId, info, {
+        imageBase64: prepared.base64,
+        localImageUri: prepared.uri,
+        skipCache: true,
       });
-    }  } catch (err) {
+      if (!jobs.has(id)) return;
+
+      const saved: SavedNutrition = {
+        ...provisional,
+        id: docId,
+        imageUrl: imageUrl || provisional.imageUrl,
+      };
+      setJob({
+        ...(jobs.get(id) ?? latest),
+        photo: prepared,
+        status: 'ready',
+        error: undefined,
+        errorKind: undefined,
+        result: saved,
+      });
+      await prependCachedAnalysis(userId, saved);
+    } catch (saveErr) {
+      const current = jobs.get(id);
+      if (!current) return;
+      // Keep the filled card visible; surface save failure only if we never showed food.
+      if (current.status !== 'ready' || !current.result) {
+        setJob({
+          ...current,
+          status: 'error',
+          error:
+            saveErr instanceof Error ? saveErr.message : 'Could not save meal.',
+          errorKind: 'generic',
+          result: undefined,
+        });
+      }
+    }
+  } catch (err) {
     const current = jobs.get(id);
     if (!current) return;
+    const noFood = isNoFoodDetectedError(err);
     setJob({
       ...current,
       status: 'error',
-      error: err instanceof Error ? err.message : 'Analysis failed.',
+      error: noFood
+        ? 'No food detected'
+        : err instanceof Error
+          ? err.message
+          : 'Analysis failed.',
+      errorKind: noFood ? 'no_food' : 'generic',
       result: undefined,
     });
   } finally {
