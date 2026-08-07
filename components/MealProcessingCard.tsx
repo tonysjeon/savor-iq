@@ -52,16 +52,17 @@ function SkeletonBar({
   );
 }
 
-function retakeFromNoFoodCard(jobId: string) {
-  // Drop the no-food card before opening camera so X or a new shot both leave Home clean.
+function retakeFromAnalysisCard(jobId: string) {
   dismissMealAnalysis(jobId);
   router.push('/analyze' as Href);
 }
 
+const CARD_HEIGHT = 120;
+
 export function MealProcessingCard({ job }: { job: MealAnalysisJob }) {
   const pulse = useRef(new Animated.Value(0)).current;
   const isError = job.status === 'error';
-  const isNoFood = isError && job.errorKind === 'no_food';
+  const isRetakeError = isError && job.errorKind === 'food_not_detected';
   const isReady = job.status === 'ready' && job.result;
 
   useEffect(() => {
@@ -141,22 +142,35 @@ export function MealProcessingCard({ job }: { job: MealAnalysisJob }) {
     );
   }
 
-  if (isNoFood) {
+  if (isRetakeError) {
     return (
-      <Pressable
-        style={styles.card}
-        onPress={() => retakeFromNoFoodCard(job.id)}
-        accessibilityRole="button"
-        accessibilityLabel="No food detected. Tap to retry"
-      >
-        <Image source={{ uri: job.photo.uri }} style={styles.thumb} />
-        <View style={styles.body}>
-          <Text style={styles.mealTitle} numberOfLines={1}>
-            No food detected
-          </Text>
-          <Text style={styles.retryHint}>Tap to retry</Text>
-        </View>
-      </Pressable>
+      <View style={styles.card}>
+        <Pressable
+          style={styles.retakePressable}
+          onPress={() => retakeFromAnalysisCard(job.id)}
+          accessibilityRole="button"
+          accessibilityLabel="Food not detected. Tap to retry"
+        >
+          <Image source={{ uri: job.photo.uri }} style={styles.thumb} />
+          <View style={styles.body}>
+            <Text style={styles.retakeTitle} numberOfLines={1}>
+              Food not detected
+            </Text>
+            <View style={styles.retryPill}>
+              <Text style={styles.retryPillText}>Tap to retry</Text>
+            </View>
+          </View>
+        </Pressable>
+        <Pressable
+          style={styles.retakeDismiss}
+          onPress={() => dismissMealAnalysis(job.id)}
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss"
+          hitSlop={8}
+        >
+          <Ionicons name="close" size={16} color={colors.textMuted} />
+        </Pressable>
+      </View>
     );
   }
 
@@ -230,11 +244,29 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     flexDirection: 'row',
     overflow: 'hidden',
-    minHeight: 108,
+    height: CARD_HEIGHT,
+    position: 'relative',
+  },
+  retakePressable: {
+    flex: 1,
+    flexDirection: 'row',
+    height: CARD_HEIGHT,
+  },
+  retakeDismiss: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    zIndex: 1,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceElevated,
   },
   thumb: {
     width: 108,
-    height: 108,
+    height: CARD_HEIGHT,
     backgroundColor: colors.surfaceElevated,
   },
   body: {
@@ -296,9 +328,23 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
   },
-  retryHint: {
+  retakeTitle: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '500',
+    paddingRight: 28,
+  },
+  retryPill: {
+    alignSelf: 'flex-start',
+    marginLeft: 6,
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  retryPillText: {
     color: colors.textSecondary,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
   },
   errorTitle: {
