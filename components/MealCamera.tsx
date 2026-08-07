@@ -7,12 +7,19 @@ import {
   Text,
   View,
 } from 'react-native';
-import { CameraView, useCameraPermissions, type CameraType } from 'expo-camera';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Path } from 'react-native-svg';
 
 import { colors } from '@/constants/theme';
+
+const OVERLAY_ICON = '#FFFFFF';
+const CORNER = 48;
+const CORNER_RADIUS = 20;
+const STROKE = 3.5;
+const FRAME_STROKE = 'rgba(255,255,255,0.95)';
 
 export type CapturedMealPhoto = {
   uri: string;
@@ -26,11 +33,53 @@ type MealCameraProps = {
   disabled?: boolean;
 };
 
+function FrameCorner({
+  corner,
+}: {
+  corner: 'tl' | 'tr' | 'bl' | 'br';
+}) {
+  const s = CORNER;
+  const r = CORNER_RADIUS;
+  const half = STROKE / 2;
+
+  let d = '';
+  if (corner === 'tl') {
+    d = `M ${half} ${s} L ${half} ${r} Q ${half} ${half} ${r} ${half} L ${s} ${half}`;
+  } else if (corner === 'tr') {
+    d = `M ${s - half} ${s} L ${s - half} ${r} Q ${s - half} ${half} ${s - r} ${half} L 0 ${half}`;
+  } else if (corner === 'bl') {
+    d = `M ${half} 0 L ${half} ${s - r} Q ${half} ${s - half} ${r} ${s - half} L ${s} ${s - half}`;
+  } else {
+    d = `M ${s - half} 0 L ${s - half} ${s - r} Q ${s - half} ${s - half} ${s - r} ${s - half} L 0 ${s - half}`;
+  }
+
+  const positionStyle =
+    corner === 'tl'
+      ? styles.cornerTL
+      : corner === 'tr'
+        ? styles.cornerTR
+        : corner === 'bl'
+          ? styles.cornerBL
+          : styles.cornerBR;
+
+  return (
+    <Svg width={s} height={s} style={positionStyle}>
+      <Path
+        d={d}
+        stroke={FRAME_STROKE}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </Svg>
+  );
+}
+
 export function MealCamera({ onClose, onCapture, disabled = false }: MealCameraProps) {
   const insets = useSafeAreaInsets();
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
-  const [facing, setFacing] = useState<CameraType>('back');
   const [torch, setTorch] = useState(false);
   const [ready, setReady] = useState(false);
   const [capturing, setCapturing] = useState(false);
@@ -128,14 +177,17 @@ export function MealCamera({ onClose, onCapture, disabled = false }: MealCameraP
         </View>
       ) : !permission.granted ? (
         <View style={[styles.center, { paddingTop: insets.top }]}>
+          <View style={styles.grabberWrap} pointerEvents="none">
+            <View style={styles.grabber} />
+          </View>
           <Pressable
-            style={[styles.iconButton, styles.permissionBack, { top: insets.top + 4 }]}
+            style={[styles.circleButton, styles.permissionClose, { top: 8 }]}
             onPress={onClose}
-            accessibilityLabel="Go back"
+            accessibilityLabel="Close"
           >
-            <Ionicons name="chevron-back" size={24} color={colors.text} style={styles.backIcon} />
+            <Ionicons name="close" size={22} color={OVERLAY_ICON} />
           </Pressable>
-          <Ionicons name="camera-outline" size={40} color={colors.textMuted} />
+          <Ionicons name="camera-outline" size={40} color="rgba(255,255,255,0.55)" />
           <Text style={styles.permissionTitle}>Camera access needed</Text>
           <Text style={styles.permissionBody}>
             Allow camera access to photograph your meal for nutrition analysis.
@@ -152,86 +204,76 @@ export function MealCamera({ onClose, onCapture, disabled = false }: MealCameraP
           <CameraView
             ref={cameraRef}
             style={StyleSheet.absoluteFill}
-            facing={facing}
-            enableTorch={torch && facing === 'back'}
+            facing="back"
+            enableTorch={torch}
             mode="picture"
+            zoom={0}
             onCameraReady={() => setReady(true)}
           />
 
+          <View style={styles.grabberWrap} pointerEvents="none">
+            <View style={styles.grabber} />
+          </View>
+
           <View style={styles.frameGuide} pointerEvents="none">
-            <View style={styles.frameCornerTL} />
-            <View style={styles.frameCornerTR} />
-            <View style={styles.frameCornerBL} />
-            <View style={styles.frameCornerBR} />
-            <Text style={styles.frameHint}>Center the meal in the frame</Text>
+            <FrameCorner corner="tl" />
+            <FrameCorner corner="tr" />
+            <FrameCorner corner="bl" />
+            <FrameCorner corner="br" />
           </View>
 
-          <View style={[styles.topBar, { top: Math.max(insets.top, 4) }]}>
+          <View style={[styles.topBar, { top: 18 }]}>
             <Pressable
-              style={styles.iconButton}
+              style={styles.circleButton}
               onPress={onClose}
-              accessibilityLabel="Go back"
+              accessibilityLabel="Close"
             >
-              <Ionicons
-                name="chevron-back"
-                size={24}
-                color={colors.text}
-                style={styles.backIcon}
-              />
+              <Ionicons name="close" size={22} color={OVERLAY_ICON} />
             </Pressable>
-            <View style={styles.topActions}>
-              {facing === 'back' ? (
-                <Pressable
-                  style={styles.iconButton}
-                  onPress={() => setTorch((value) => !value)}
-                  accessibilityLabel={torch ? 'Turn torch off' : 'Turn torch on'}
-                >
-                  <Ionicons
-                    name={torch ? 'flash' : 'flash-outline'}
-                    size={22}
-                    color={colors.text}
-                  />
-                </Pressable>
-              ) : null}
-              <Pressable
-                style={styles.iconButton}
-                onPress={() => {
-                  setTorch(false);
-                  setFacing((current) => (current === 'back' ? 'front' : 'back'));
-                }}
-                accessibilityLabel="Flip camera"
-              >
-                <Ionicons name="camera-reverse-outline" size={22} color={colors.text} />
-              </Pressable>
-            </View>
           </View>
 
-          <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 24) }]}>
+          <View
+            style={[
+              styles.bottomBar,
+              { paddingBottom: Math.max(insets.bottom, 24) + 10 },
+            ]}
+          >
             {error ? <Text style={styles.error}>{error}</Text> : null}
             <View style={styles.controlsRow}>
               <Pressable
-                style={[styles.galleryButton, busy && styles.shutterDisabled]}
+                style={[styles.circleButton, busy && styles.controlDisabled]}
                 disabled={busy}
                 onPress={openGallery}
                 accessibilityLabel="Open gallery"
               >
-                <Ionicons name="images-outline" size={24} color={colors.text} />
+                <Ionicons name="image" size={22} color={OVERLAY_ICON} />
               </Pressable>
 
               <Pressable
-                style={[styles.shutter, (!ready || busy) && styles.shutterDisabled]}
+                style={[styles.shutter, (!ready || busy) && styles.controlDisabled]}
                 disabled={!ready || busy}
                 onPress={takePhoto}
                 accessibilityLabel="Take photo"
               >
                 {capturing ? (
-                  <ActivityIndicator color={colors.buttonPrimaryText} />
+                  <ActivityIndicator color="#111111" />
                 ) : (
                   <View style={styles.shutterInner} />
                 )}
               </Pressable>
 
-              <View style={styles.gallerySpacer} />
+              <Pressable
+                style={[styles.circleButton, busy && styles.controlDisabled]}
+                disabled={busy}
+                onPress={() => setTorch((value) => !value)}
+                accessibilityLabel={torch ? 'Turn flash off' : 'Turn flash on'}
+              >
+                <Ionicons
+                  name={torch ? 'flash' : 'flash-off'}
+                  size={18}
+                  color={OVERLAY_ICON}
+                />
+              </Pressable>
             </View>
           </View>
         </View>
@@ -240,16 +282,28 @@ export function MealCamera({ onClose, onCapture, disabled = false }: MealCameraP
   );
 }
 
-const CORNER = 28;
-const STROKE = 3;
-
 const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: '#000',
+    overflow: 'hidden',
   },
   flex: {
     flex: 1,
+  },
+  grabberWrap: {
+    position: 'absolute',
+    top: 10,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 3,
+  },
+  grabber: {
+    width: 56,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.55)',
   },
   center: {
     flex: 1,
@@ -258,19 +312,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
     gap: 12,
   },
-  permissionBack: {
+  permissionClose: {
     position: 'absolute',
     top: 8,
     left: 16,
   },
   permissionTitle: {
-    color: colors.text,
+    color: OVERLAY_ICON,
     fontSize: 20,
     fontWeight: '700',
     marginTop: 8,
   },
   permissionBody: {
-    color: colors.textSecondary,
+    color: 'rgba(255,255,255,0.7)',
     fontSize: 15,
     lineHeight: 21,
     textAlign: 'center',
@@ -282,82 +336,42 @@ const styles = StyleSheet.create({
     right: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    zIndex: 2,
+    zIndex: 4,
   },
-  topActions: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  iconButton: {
+  circleButton: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: 'rgba(40,40,40,0.55)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  backIcon: {
-    // Ionicons chevron-back sits left of center in its glyph box.
-    transform: [{ translateX: 2 }],
-  },
   frameGuide: {
     position: 'absolute',
-    left: '10%',
-    right: '10%',
-    top: '22%',
-    bottom: '30%',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    paddingBottom: 16,
+    left: '8%',
+    right: '8%',
+    top: '18%',
+    bottom: '28%',
   },
-  frameCornerTL: {
+  cornerTL: {
     position: 'absolute',
     top: 0,
     left: 0,
-    width: CORNER,
-    height: CORNER,
-    borderTopWidth: STROKE,
-    borderLeftWidth: STROKE,
-    borderColor: 'rgba(255,255,255,0.9)',
   },
-  frameCornerTR: {
+  cornerTR: {
     position: 'absolute',
     top: 0,
     right: 0,
-    width: CORNER,
-    height: CORNER,
-    borderTopWidth: STROKE,
-    borderRightWidth: STROKE,
-    borderColor: 'rgba(255,255,255,0.9)',
   },
-  frameCornerBL: {
+  cornerBL: {
     position: 'absolute',
     bottom: 0,
     left: 0,
-    width: CORNER,
-    height: CORNER,
-    borderBottomWidth: STROKE,
-    borderLeftWidth: STROKE,
-    borderColor: 'rgba(255,255,255,0.9)',
   },
-  frameCornerBR: {
+  cornerBR: {
     position: 'absolute',
     bottom: 0,
     right: 0,
-    width: CORNER,
-    height: CORNER,
-    borderBottomWidth: STROKE,
-    borderRightWidth: STROKE,
-    borderColor: 'rgba(255,255,255,0.9)',
-  },
-  frameHint: {
-    color: 'rgba(255,255,255,0.85)',
-    fontSize: 14,
-    fontWeight: '600',
-    textShadowColor: 'rgba(0,0,0,0.6)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
   },
   bottomBar: {
     position: 'absolute',
@@ -367,7 +381,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     paddingTop: 16,
-    paddingHorizontal: 28,
+    paddingHorizontal: 48,
   },
   controlsRow: {
     width: '100%',
@@ -375,36 +389,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  galleryButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.35)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  gallerySpacer: {
-    width: 48,
-  },
   shutter: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
+    width: 78,
+    height: 78,
+    borderRadius: 39,
     borderWidth: 4,
-    borderColor: colors.text,
+    borderColor: 'rgba(255,255,255,0.85)',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'transparent',
   },
   shutterInner: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: colors.text,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#FFFFFF',
   },
-  shutterDisabled: {
+  controlDisabled: {
     opacity: 0.45,
   },
   primaryButton: {
@@ -425,7 +426,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   textButtonLabel: {
-    color: colors.textSecondary,
+    color: 'rgba(255,255,255,0.7)',
     fontSize: 15,
   },
   error: {
