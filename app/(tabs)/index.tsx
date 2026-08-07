@@ -288,6 +288,7 @@ export default function HomeScreen() {
       <View style={styles.weekRow}>
         {days.map((day) => {
           const selected = sameDay(day, selectedDay);
+          const isToday = sameDay(day, today);
           const weekday = WEEKDAY_LABELS[day.getDay()];
           return (
             <Pressable
@@ -298,7 +299,13 @@ export default function HomeScreen() {
               <Text style={[styles.dayWeekday, selected && styles.dayWeekdaySelected]}>
                 {weekday}
               </Text>
-              <View style={[styles.dayCircle, selected && styles.dayCircleSelected]}>
+              <View
+                style={[
+                  styles.dayCircle,
+                  selected && styles.dayCircleSelected,
+                  isToday && !selected && styles.dayCircleToday,
+                ]}
+              >
                 <Text style={[styles.dayNumber, selected && styles.dayNumberSelected]}>
                   {day.getDate()}
                 </Text>
@@ -773,6 +780,10 @@ const styles = StyleSheet.create({
   },
   dayCircleSelected: {
     backgroundColor: colors.text,
+  },
+  dayCircleToday: {
+    borderWidth: 2,
+    borderColor: colors.text,
   },
   dayNumber: {
     color: colors.textMuted,
