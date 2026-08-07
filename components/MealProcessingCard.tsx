@@ -18,6 +18,14 @@ import {
   retryMealAnalysis,
 } from '@/lib/mealAnalysisQueue';
 
+function formatMealTime(createdAt: number | null | undefined): string {
+  if (createdAt == null) return '';
+  return new Date(createdAt).toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
 function SkeletonBar({
   width,
   height = 14,
@@ -45,9 +53,10 @@ function SkeletonBar({
 export function MealProcessingCard({ job }: { job: MealAnalysisJob }) {
   const pulse = useRef(new Animated.Value(0)).current;
   const isError = job.status === 'error';
+  const isReady = job.status === 'ready' && job.result;
 
   useEffect(() => {
-    if (isError) {
+    if (isError || isReady) {
       pulse.stopAnimation();
       pulse.setValue(0.5);
       return;
@@ -71,7 +80,57 @@ export function MealProcessingCard({ job }: { job: MealAnalysisJob }) {
     );
     loop.start();
     return () => loop.stop();
-  }, [isError, pulse]);
+  }, [isError, isReady, pulse]);
+
+  const imageUri = job.result?.imageUrl || job.photo.uri;
+
+  if (isReady && job.result) {
+    const meal = job.result;
+    const timeLabel = formatMealTime(meal.createdAt);
+    return (
+      <View style={styles.card}>
+        <Image source={{ uri: imageUri }} style={styles.thumb} />
+        <View style={styles.body}>
+          <View style={styles.titleRow}>
+            <Text style={styles.mealTitle} numberOfLines={1}>
+              {meal.foodName}
+            </Text>
+            {timeLabel ? <Text style={styles.mealTime}>{timeLabel}</Text> : null}
+          </View>
+          <View style={styles.calorieRow}>
+            <Ionicons name="flame" size={18} color={colors.text} />
+            <Text style={styles.mealCalories}>
+              {Math.round(meal.calories)} calories
+            </Text>
+          </View>
+          <View style={styles.macroRow}>
+            <View style={styles.macro}>
+              <MaterialCommunityIcons
+                name="food-drumstick"
+                size={16}
+                color="#E57373"
+              />
+              <Text style={styles.macroText}>
+                {Math.round(meal.macros.protein)}g
+              </Text>
+            </View>
+            <View style={styles.macro}>
+              <MaterialCommunityIcons name="barley" size={16} color="#FFA726" />
+              <Text style={styles.macroText}>
+                {Math.round(meal.macros.carbs)}g
+              </Text>
+            </View>
+            <View style={styles.macro}>
+              <MaterialCommunityIcons name="peanut" size={16} color="#66BB6A" />
+              <Text style={styles.macroText}>
+                {Math.round(meal.macros.fat)}g
+              </Text>
+            </View>
+          </View>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.card}>
@@ -163,10 +222,26 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 8,
   },
+  mealTitle: {
+    flex: 1,
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  mealTime: {
+    color: colors.textMuted,
+    fontSize: 13,
+    fontWeight: '500',
+  },
   calorieRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+  },
+  mealCalories: {
+    color: colors.text,
+    fontSize: 20,
+    fontWeight: '700',
   },
   macroRow: {
     flexDirection: 'row',
@@ -177,6 +252,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+  },
+  macroText: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '600',
   },
   skeleton: {
     backgroundColor: colors.surfaceElevated,

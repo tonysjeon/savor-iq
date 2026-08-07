@@ -1,10 +1,14 @@
 import type { CapturedMealPhoto } from '@/components/MealCamera';
 import type { AnalyzeSource } from '@/lib/analyzeSession';
-import { saveNutritionAnalysis } from '@/lib/firestore';
+import {
+  saveNutritionAnalysis,
+  type SavedNutrition,
+} from '@/lib/firestore';
 import { analyzeNutritionFromImage } from '@/lib/gemini';
 import { prepareMealPhotoForAnalysis } from '@/lib/mealPhoto';
+import { prependCachedAnalysis } from '@/lib/userHistoryCache';
 
-export type MealAnalysisJobStatus = 'processing' | 'error';
+export type MealAnalysisJobStatus = 'processing' | 'ready' | 'error';
 
 export type MealAnalysisJob = {
   id: string;
@@ -14,6 +18,8 @@ export type MealAnalysisJob = {
   userId: string | null;
   createdAt: number;
   error?: string;
+  /** Filled when analysis completes — same card flips from skeleton to this. */
+  result?: SavedNutrition;
 };
 
 type JobListener = () => void;
@@ -52,13 +58,25 @@ export function getMealAnalysisJob(id: string): MealAnalysisJob | null {
   return jobs.get(id) ?? null;
 }
 
+/** Drop ready jobs once Home history already contains their saved meal. */
+export function pruneReadyJobs(savedIds: Set<string>): void {
+  let changed = false;
+  for (const [id, job] of jobs) {
+    if (job.status === 'ready' && job.result && savedIds.has(job.result.id)) {
+      jobs.delete(id);
+      changed = true;
+    }
+  }
+  if (changed) notify();
+}
+
 async function runJob(id: string): Promise<void> {
   if (running.has(id)) return;
   const job = jobs.get(id);
   if (!job) return;
 
   running.add(id);
-  setJob({ ...job, status: 'processing', error: undefined });
+  setJob({ ...job, status: 'processing', error: undefined, result: undefined });
 
   try {
     const latest = jobs.get(id) ?? job;
@@ -70,6 +88,7 @@ async function runJob(id: string): Promise<void> {
       photo: prepared,
       status: 'processing',
       error: undefined,
+      result: undefined,
     });
 
     const info = await analyzeNutritionFromImage(
@@ -79,21 +98,58 @@ async function runJob(id: string): Promise<void> {
     if (!jobs.has(id)) return;
 
     const userId = jobs.get(id)?.userId ?? latest.userId;
+    const imageUrl = prepared.uri;
+    const createdAtMs = Date.now();
+
+    let result: SavedNutrition;
     if (userId) {
-      await saveNutritionAnalysis(userId, info, {
+      const docId = await saveNutritionAnalysis(userId, info, {
         imageBase64: prepared.base64,
         localImageUri: prepared.uri,
+        skipCache: true,
       });
+      result = {
+        ...info,
+        id: docId,
+        imageUrl,
+        createdAt: createdAtMs,
+      };
+    } else {
+      result = {
+        ...info,
+        id,
+        imageUrl,
+        createdAt: createdAtMs,
+      };
     }
 
-    removeJob(id);
-  } catch (err) {
+    if (!jobs.has(id)) return;
+
+    // Flip this same card to the completed meal before history updates.
+    setJob({
+      ...(jobs.get(id) ?? latest),
+      photo: prepared,
+      status: 'ready',
+      error: undefined,
+      result: {
+        ...result,
+        imageUrl: result.imageUrl || prepared.uri,
+      },
+    });
+
+    if (userId) {
+      await prependCachedAnalysis(userId, {
+        ...result,
+        imageUrl: result.imageUrl || prepared.uri,
+      });
+    }  } catch (err) {
     const current = jobs.get(id);
     if (!current) return;
     setJob({
       ...current,
       status: 'error',
       error: err instanceof Error ? err.message : 'Analysis failed.',
+      result: undefined,
     });
   } finally {
     running.delete(id);

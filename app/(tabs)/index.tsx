@@ -26,6 +26,7 @@ import {
 } from '@/lib/firestore';
 import {
   listMealAnalysisJobs,
+  pruneReadyJobs,
   subscribeMealAnalysisJobs,
   type MealAnalysisJob,
 } from '@/lib/mealAnalysisQueue';
@@ -189,6 +190,11 @@ export default function HomeScreen() {
     });
   }, []);
 
+  useEffect(() => {
+    const savedIds = new Set(analyses.map((item) => item.id));
+    pruneReadyJobs(savedIds);
+  }, [analyses]);
+
   useFocusEffect(
     useCallback(() => {
       if (!user) {
@@ -232,13 +238,17 @@ export default function HomeScreen() {
     () => sumForDay(analyses, selectedDay),
     [analyses, selectedDay],
   );
-  const recentMeals = useMemo(
-    () =>
-      [...analyses]
-        .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
-        .slice(0, Math.max(0, 5 - processingJobs.length)),
-    [analyses, processingJobs.length],
-  );
+  const recentMeals = useMemo(() => {
+    const jobResultIds = new Set(
+      processingJobs
+        .map((job) => job.result?.id)
+        .filter((id): id is string => Boolean(id)),
+    );
+    return [...analyses]
+      .filter((item) => !jobResultIds.has(item.id))
+      .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+      .slice(0, Math.max(0, 5 - processingJobs.length));
+  }, [analyses, processingJobs]);
   const hasRecentSection = processingJobs.length > 0 || recentMeals.length > 0;
 
   const caloriesLeft = Math.max(0, Math.round(DAILY_GOALS.calories - dayTotals.calories));

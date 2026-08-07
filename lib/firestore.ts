@@ -33,6 +33,8 @@ export type SavedNutrition = NutritionInfo & {
 export type SaveNutritionOptions = {
   imageBase64?: string;
   localImageUri?: string;
+  /** When true, write Firestore only — caller updates local cache after UI handoff. */
+  skipCache?: boolean;
 };
 
 function requireDb() {
@@ -212,12 +214,14 @@ export async function saveNutritionAnalysis(
     collection(firestore, 'users', uid, 'analyses'),
     payload,
   );
-  await prependCachedAnalysis(uid, {
-    ...info,
-    id: docRef.id,
-    imageUrl: imageUrl || undefined,
-    createdAt: createdAtMs,
-  });
+  if (!options.skipCache) {
+    await prependCachedAnalysis(uid, {
+      ...info,
+      id: docRef.id,
+      imageUrl: imageUrl || undefined,
+      createdAt: createdAtMs,
+    });
+  }
   return docRef.id;
 }
 
