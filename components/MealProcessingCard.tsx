@@ -10,7 +10,9 @@ import {
   View,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { router, type Href } from 'expo-router';
 
+import { AvocadoIcon } from '@/components/AvocadoIcon';
 import { colors } from '@/constants/theme';
 import type { MealAnalysisJob } from '@/lib/mealAnalysisQueue';
 import {
@@ -50,9 +52,16 @@ function SkeletonBar({
   );
 }
 
+function retakeFromNoFoodCard(jobId: string) {
+  // Drop the no-food card before opening camera so X or a new shot both leave Home clean.
+  dismissMealAnalysis(jobId);
+  router.push('/analyze' as Href);
+}
+
 export function MealProcessingCard({ job }: { job: MealAnalysisJob }) {
   const pulse = useRef(new Animated.Value(0)).current;
   const isError = job.status === 'error';
+  const isNoFood = isError && job.errorKind === 'no_food';
   const isReady = job.status === 'ready' && job.result;
 
   useEffect(() => {
@@ -121,7 +130,7 @@ export function MealProcessingCard({ job }: { job: MealAnalysisJob }) {
               </Text>
             </View>
             <View style={styles.macro}>
-              <MaterialCommunityIcons name="peanut" size={16} color="#66BB6A" />
+              <AvocadoIcon size={16} color="#66BB6A" />
               <Text style={styles.macroText}>
                 {Math.round(meal.macros.fat)}g
               </Text>
@@ -129,6 +138,25 @@ export function MealProcessingCard({ job }: { job: MealAnalysisJob }) {
           </View>
         </View>
       </View>
+    );
+  }
+
+  if (isNoFood) {
+    return (
+      <Pressable
+        style={styles.card}
+        onPress={() => retakeFromNoFoodCard(job.id)}
+        accessibilityRole="button"
+        accessibilityLabel="No food detected. Tap to retry"
+      >
+        <Image source={{ uri: job.photo.uri }} style={styles.thumb} />
+        <View style={styles.body}>
+          <Text style={styles.mealTitle} numberOfLines={1}>
+            No food detected
+          </Text>
+          <Text style={styles.retryHint}>Tap to retry</Text>
+        </View>
+      </Pressable>
     );
   }
 
@@ -183,7 +211,7 @@ export function MealProcessingCard({ job }: { job: MealAnalysisJob }) {
                 <SkeletonBar width={28} height={14} pulse={pulse} />
               </View>
               <View style={styles.macro}>
-                <MaterialCommunityIcons name="peanut" size={16} color="#66BB6A" />
+                <AvocadoIcon size={16} color="#66BB6A" />
                 <SkeletonBar width={28} height={14} pulse={pulse} />
               </View>
             </View>
@@ -226,7 +254,7 @@ const styles = StyleSheet.create({
     flex: 1,
     color: colors.text,
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '500',
   },
   mealTime: {
     color: colors.textMuted,
@@ -236,12 +264,13 @@ const styles = StyleSheet.create({
   calorieRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 4,
   },
   mealCalories: {
     color: colors.text,
-    fontSize: 20,
-    fontWeight: '700',
+    fontSize: 17,
+    fontWeight: '600',
+    marginLeft: -2,
   },
   macroRow: {
     flexDirection: 'row',
@@ -256,7 +285,7 @@ const styles = StyleSheet.create({
   macroText: {
     color: colors.text,
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '400',
   },
   skeleton: {
     backgroundColor: colors.surfaceElevated,
@@ -266,6 +295,11 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 12,
     fontWeight: '500',
+  },
+  retryHint: {
+    color: colors.textSecondary,
+    fontSize: 14,
+    fontWeight: '600',
   },
   errorTitle: {
     color: colors.text,
