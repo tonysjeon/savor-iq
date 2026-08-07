@@ -15,6 +15,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AvocadoIcon } from '@/components/AvocadoIcon';
+import { AnimatedNumber } from '@/components/AnimatedNumber';
 import { ProgressRing } from '@/components/ProgressRing';
 import { MealProcessingCard } from '@/components/MealProcessingCard';
 import { useAuth } from '@/context/AuthContext';
@@ -338,13 +339,19 @@ export default function HomeScreen() {
                     <View style={styles.calorieCopy}>
                       {showEaten ? (
                         <View style={styles.calorieValueRow}>
-                          <Text style={styles.calorieValue}>{caloriesEaten}</Text>
+                          <AnimatedNumber
+                            value={caloriesEaten}
+                            style={styles.calorieValue}
+                          />
                           <Text style={styles.calorieGoal}>
                             /{DAILY_GOALS.calories}
                           </Text>
                         </View>
                       ) : (
-                        <Text style={styles.calorieValue}>{caloriesLeft}</Text>
+                        <AnimatedNumber
+                          value={caloriesLeft}
+                          style={styles.calorieValue}
+                        />
                       )}
                       <View style={styles.calorieLabelRow}>
                         <Text style={styles.calorieLabel}>
@@ -387,11 +394,18 @@ export default function HomeScreen() {
                         >
                           {showEaten ? (
                             <View style={styles.macroValueRow}>
-                              <Text style={styles.macroValue}>{eaten}</Text>
+                              <AnimatedNumber
+                                value={eaten}
+                                style={styles.macroValue}
+                              />
                               <Text style={styles.macroGoal}>/{goal}g</Text>
                             </View>
                           ) : (
-                            <Text style={styles.macroValue}>{left}g</Text>
+                            <AnimatedNumber
+                              value={left}
+                              suffix="g"
+                              style={styles.macroValue}
+                            />
                           )}
                           <Text style={styles.macroLabel}>
                             {macro.label} {showEaten ? 'eaten' : 'left'}
@@ -431,9 +445,11 @@ export default function HomeScreen() {
                 >
                   <View style={styles.macroRow}>
                     <View style={styles.wideMetricCard}>
-                      <Text style={styles.wideMetricValue}>
-                        {avgHealthScore > 0 ? avgHealthScore.toFixed(1) : '0'}
-                      </Text>
+                      <AnimatedNumber
+                        value={avgHealthScore}
+                        decimals={1}
+                        style={styles.wideMetricValue}
+                      />
                       <Text style={styles.wideMetricLabel}>Health score</Text>
                       <ProgressRing
                         size={64}
@@ -451,7 +467,11 @@ export default function HomeScreen() {
                       </ProgressRing>
                     </View>
                     <View style={styles.wideMetricCard}>
-                      <Text style={styles.wideMetricValue}>{waterIntake}ml</Text>
+                      <AnimatedNumber
+                        value={waterIntake}
+                        suffix="ml"
+                        style={styles.wideMetricValue}
+                      />
                       <Text style={styles.wideMetricLabel}>Water</Text>
                       <ProgressRing
                         size={64}
@@ -481,21 +501,23 @@ export default function HomeScreen() {
                     >
                       {showEaten ? (
                         <View style={styles.macroValueRow}>
-                          <Text style={styles.macroValue}>
-                            {Math.round(dayTotals.fiber)}
-                          </Text>
+                          <AnimatedNumber
+                            value={Math.round(dayTotals.fiber)}
+                            style={styles.macroValue}
+                          />
                           <Text style={styles.macroGoal}>
                             /{DAILY_GOALS.fiber}g
                           </Text>
                         </View>
                       ) : (
-                        <Text style={styles.macroValue}>
-                          {Math.max(
+                        <AnimatedNumber
+                          value={Math.max(
                             0,
                             Math.round(DAILY_GOALS.fiber - dayTotals.fiber),
                           )}
-                          g
-                        </Text>
+                          suffix="g"
+                          style={styles.macroValue}
+                        />
                       )}
                       <Text style={styles.macroLabel}>
                         Fiber {showEaten ? 'eaten' : 'left'}
@@ -525,13 +547,18 @@ export default function HomeScreen() {
                     >
                       {showEaten ? (
                         <View style={styles.macroValueRow}>
-                          <Text style={styles.macroValue}>{sugarIntake}</Text>
+                          <AnimatedNumber
+                            value={sugarIntake}
+                            style={styles.macroValue}
+                          />
                           <Text style={styles.macroGoal}>/{DAILY_GOALS.sugar}g</Text>
                         </View>
                       ) : (
-                        <Text style={styles.macroValue}>
-                          {Math.max(0, DAILY_GOALS.sugar - sugarIntake)}g
-                        </Text>
+                        <AnimatedNumber
+                          value={Math.max(0, DAILY_GOALS.sugar - sugarIntake)}
+                          suffix="g"
+                          style={styles.macroValue}
+                        />
                       )}
                       <Text style={styles.macroLabel}>
                         Sugar {showEaten ? 'eaten' : 'left'}
@@ -561,15 +588,20 @@ export default function HomeScreen() {
                     >
                       {showEaten ? (
                         <View style={styles.macroValueRow}>
-                          <Text style={styles.macroValue}>{sodiumIntake}</Text>
+                          <AnimatedNumber
+                            value={sodiumIntake}
+                            style={styles.macroValue}
+                          />
                           <Text style={styles.macroGoal}>
                             /{DAILY_GOALS.sodium}mg
                           </Text>
                         </View>
                       ) : (
-                        <Text style={styles.macroValue}>
-                          {Math.max(0, DAILY_GOALS.sodium - sodiumIntake)}mg
-                        </Text>
+                        <AnimatedNumber
+                          value={Math.max(0, DAILY_GOALS.sodium - sodiumIntake)}
+                          suffix="mg"
+                          style={styles.macroValue}
+                        />
                       )}
                       <Text style={styles.macroLabel}>
                         Sodium {showEaten ? 'eaten' : 'left'}
@@ -833,6 +865,7 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 20,
     fontWeight: '600',
+    lineHeight: 24,
   },
   wideMetricLabel: {
     color: colors.textMuted,
