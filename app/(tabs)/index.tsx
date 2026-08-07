@@ -14,8 +14,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import Svg, { Ellipse, Path } from 'react-native-svg';
-
+import { AvocadoIcon } from '@/components/AvocadoIcon';
 import { ProgressRing } from '@/components/ProgressRing';
 import { MealProcessingCard } from '@/components/MealProcessingCard';
 import { useAuth } from '@/context/AuthContext';
@@ -35,6 +34,7 @@ import {
   loadHistoryCache,
   subscribeHistoryCache,
   dedupeAnalyses,
+  analysisFingerprint,
 } from '@/lib/userHistoryCache';
 
 const WEEKDAY_LABELS = ['Su', 'M', 'Tu', 'W', 'Th', 'F', 'Sa'] as const;
@@ -68,26 +68,9 @@ const MACRO_META = [
   {
     key: 'fat' as const,
     label: 'Fat',
-    color: '#64B5F6',
+    color: '#66BB6A',
   },
 ] as const;
-
-function AvocadoIcon({ size }: { size: number }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" pointerEvents="none">
-      <Path
-        d="M12 1.8c-3.1 0-5.4 2.1-5.9 5C5.4 10.4 5 14.2 5.8 17.2 6.6 20.4 9.1 22.2 12 22.2s5.4-1.8 6.2-5c.8-3 .4-6.8-.3-10.4C17.4 3.9 15.1 1.8 12 1.8z"
-        fill="#689F38"
-      />
-      <Path
-        d="M12 3.6c-2.1 0-3.7 1.5-4.1 3.4-.7 3.2-1 6.4-.4 8.8.5 2.4 2.3 4 4.5 4s4-1.6 4.5-4c.6-2.4.3-5.6-.4-8.8C15.7 5.1 14.1 3.6 12 3.6z"
-        fill="#C5E1A5"
-      />
-      <Ellipse cx="12" cy="14.4" rx="3.4" ry="3.5" fill="#5D4037" />
-      <Ellipse cx="12.9" cy="13.3" rx="1" ry="1.15" fill="#A1887F" opacity={0.8} />
-    </Svg>
-  );
-}
 
 function startOfDay(date: Date): number {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
@@ -244,8 +227,25 @@ export default function HomeScreen() {
         .map((job) => job.result?.id)
         .filter((id): id is string => Boolean(id)),
     );
+    const jobFingerprints = new Set(
+      processingJobs
+        .map((job) => (job.result ? analysisFingerprint(job.result) : null))
+        .filter((fp): fp is string => Boolean(fp)),
+    );
+
     return [...analyses]
-      .filter((item) => !jobResultIds.has(item.id))
+      .filter((item) => {
+        if (jobResultIds.has(item.id)) return false;
+        if (jobFingerprints.has(analysisFingerprint(item))) return false;
+
+        // Hide cloud rows that land while this job is still analyzing/saving.
+        for (const job of processingJobs) {
+          if (job.status !== 'processing') continue;
+          if (item.createdAt == null) continue;
+          if (item.createdAt >= job.createdAt - 2000) return false;
+        }
+        return true;
+      })
       .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
       .slice(0, Math.max(0, 5 - processingJobs.length));
   }, [analyses, processingJobs]);
@@ -405,7 +405,7 @@ export default function HomeScreen() {
                             style={styles.macroRing}
                           >
                             {macro.key === 'fat' ? (
-                              <AvocadoIcon size={22} />
+                              <AvocadoIcon size={18} color={macro.color} />
                             ) : (
                               <MaterialCommunityIcons
                                 name={macro.icon}
@@ -504,14 +504,14 @@ export default function HomeScreen() {
                         size={64}
                         strokeWidth={7}
                         progress={dayTotals.fiber / DAILY_GOALS.fiber}
-                        color="#81C784"
+                        color="#64B5F6"
                         trackColor={colors.surfaceElevated}
                         style={styles.macroRing}
                       >
                         <MaterialCommunityIcons
                           name="food-apple"
                           size={18}
-                          color="#81C784"
+                          color="#64B5F6"
                         />
                       </ProgressRing>
                     </Pressable>
@@ -674,11 +674,7 @@ export default function HomeScreen() {
                         </Text>
                       </View>
                       <View style={styles.mealMacro}>
-                        <MaterialCommunityIcons
-                          name="peanut"
-                          size={16}
-                          color="#66BB6A"
-                        />
+                        <AvocadoIcon size={16} color="#66BB6A" />
                         <Text style={styles.mealMacroText}>
                           {Math.round(item.macros.fat)}g
                         </Text>
@@ -973,7 +969,7 @@ const styles = StyleSheet.create({
     flex: 1,
     color: colors.text,
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '500',
   },
   mealTime: {
     color: colors.textMuted,
@@ -983,12 +979,13 @@ const styles = StyleSheet.create({
   mealCalorieRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 4,
   },
   mealCalories: {
     color: colors.text,
-    fontSize: 20,
-    fontWeight: '700',
+    fontSize: 17,
+    fontWeight: '600',
+    marginLeft: -2,
   },
   mealMacroRow: {
     flexDirection: 'row',
@@ -1003,7 +1000,7 @@ const styles = StyleSheet.create({
   mealMacroText: {
     color: colors.text,
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '400',
   },
   error: {
     color: '#FF6B6B',
