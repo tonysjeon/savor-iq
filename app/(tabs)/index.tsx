@@ -757,7 +757,7 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '500',
     letterSpacing: -0.5,
-    marginLeft: -2,
+    marginLeft: 0,
   },
   weekRow: {
     flexDirection: 'row',
