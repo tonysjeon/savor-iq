@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { router, type Href } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AvocadoIcon } from '@/components/AvocadoIcon';
@@ -73,6 +74,15 @@ const MACRO_META = [
   },
 ] as const;
 
+function goalBalance(intake: number, goal: number) {
+  const roundedIntake = Math.round(intake);
+  const over = roundedIntake > goal;
+  return {
+    amount: Math.abs(goal - roundedIntake),
+    label: over ? 'over' : 'left',
+  } as const;
+}
+
 function startOfDay(date: Date): number {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 }
@@ -105,6 +115,8 @@ function sumForDay(analyses: SavedNutrition[], day: Date) {
         carbs: acc.carbs + item.macros.carbs,
         fat: acc.fat + item.macros.fat,
         fiber: acc.fiber + item.macros.fiber,
+        sugar: acc.sugar + (item.macros.sugar ?? 0),
+        sodium: acc.sodium + (item.macros.sodium ?? 0),
         healthScore: acc.healthScore + item.healthScore,
         count: acc.count + 1,
       }),
@@ -114,6 +126,8 @@ function sumForDay(analyses: SavedNutrition[], day: Date) {
         carbs: 0,
         fat: 0,
         fiber: 0,
+        sugar: 0,
+        sodium: 0,
         healthScore: 0,
         count: 0,
       },
@@ -222,6 +236,10 @@ export default function HomeScreen() {
     () => sumForDay(analyses, selectedDay),
     [analyses, selectedDay],
   );
+  const recentJobCards = useMemo(
+    () => processingJobs.slice(0, 10),
+    [processingJobs],
+  );
   const recentMeals = useMemo(() => {
     const jobResultIds = new Set(
       processingJobs
@@ -248,18 +266,17 @@ export default function HomeScreen() {
         return true;
       })
       .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
-      .slice(0, Math.max(0, 5 - processingJobs.length));
-  }, [analyses, processingJobs]);
-  const hasRecentSection = processingJobs.length > 0 || recentMeals.length > 0;
+      .slice(0, Math.max(0, 10 - recentJobCards.length));
+  }, [analyses, processingJobs, recentJobCards.length]);
+  const hasRecentSection = recentJobCards.length > 0 || recentMeals.length > 0;
 
-  const caloriesLeft = Math.max(0, Math.round(DAILY_GOALS.calories - dayTotals.calories));
   const caloriesEaten = Math.round(dayTotals.calories);
+  const calorieBalance = goalBalance(caloriesEaten, DAILY_GOALS.calories);
   const calorieProgress = dayTotals.calories / DAILY_GOALS.calories;
   const avgHealthScore =
     dayTotals.count > 0 ? dayTotals.healthScore / dayTotals.count : 0;
-  // Sugar, sodium, and water are not tracked from meal analyses yet.
-  const sugarIntake = 0;
-  const sodiumIntake = 0;
+  const sugarIntake = Math.round(dayTotals.sugar);
+  const sodiumIntake = Math.round(dayTotals.sodium);
   const waterIntake = 0;
 
   function toggleIntakeMode() {
@@ -340,7 +357,9 @@ export default function HomeScreen() {
                     onPress={toggleIntakeMode}
                     accessibilityRole="button"
                     accessibilityLabel={
-                      showEaten ? 'Show calories left' : 'Show calories eaten'
+                      showEaten
+                        ? `Show calories ${calorieBalance.label}`
+                        : 'Show calories eaten'
                     }
                   >
                     <View style={styles.calorieCopy}>
@@ -356,13 +375,15 @@ export default function HomeScreen() {
                         </View>
                       ) : (
                         <AnimatedNumber
-                          value={caloriesLeft}
+                          value={calorieBalance.amount}
                           style={styles.calorieValue}
                         />
                       )}
                       <View style={styles.calorieLabelRow}>
                         <Text style={styles.calorieLabel}>
-                          {showEaten ? 'Calories eaten' : 'Calories left'}
+                          {showEaten
+                            ? 'Calories eaten'
+                            : `Calories ${calorieBalance.label}`}
                         </Text>
                         <Ionicons
                           name="swap-vertical"
@@ -386,7 +407,7 @@ export default function HomeScreen() {
                     {MACRO_META.map((macro) => {
                       const eaten = Math.round(dayTotals[macro.key]);
                       const goal = DAILY_GOALS[macro.key];
-                      const left = Math.max(0, goal - eaten);
+                      const balance = goalBalance(eaten, goal);
                       return (
                         <Pressable
                           key={macro.key}
@@ -395,7 +416,7 @@ export default function HomeScreen() {
                           accessibilityRole="button"
                           accessibilityLabel={
                             showEaten
-                              ? `Show ${macro.label} left`
+                              ? `Show ${macro.label} ${balance.label}`
                               : `Show ${macro.label} eaten`
                           }
                         >
@@ -409,13 +430,14 @@ export default function HomeScreen() {
                             </View>
                           ) : (
                             <AnimatedNumber
-                              value={left}
+                              value={balance.amount}
                               suffix="g"
                               style={styles.macroValue}
                             />
                           )}
                           <Text style={styles.macroLabel}>
-                            {macro.label} {showEaten ? 'eaten' : 'left'}
+                            {macro.label}{' '}
+                            {showEaten ? 'eaten' : balance.label}
                           </Text>
                           <ProgressRing
                             size={64}
@@ -452,11 +474,13 @@ export default function HomeScreen() {
                 >
                   <View style={styles.macroRow}>
                     <View style={styles.wideMetricCard}>
-                      <AnimatedNumber
-                        value={avgHealthScore}
-                        decimals={1}
-                        style={styles.wideMetricValue}
-                      />
+                      <View style={styles.healthScoreValueOffset}>
+                        <AnimatedNumber
+                          value={avgHealthScore}
+                          decimals={1}
+                          style={styles.wideMetricValue}
+                        />
+                      </View>
                       <Text style={styles.wideMetricLabel}>Health score</Text>
                       <ProgressRing
                         size={64}
@@ -503,7 +527,9 @@ export default function HomeScreen() {
                       onPress={toggleIntakeMode}
                       accessibilityRole="button"
                       accessibilityLabel={
-                        showEaten ? 'Show fiber left' : 'Show fiber eaten'
+                        showEaten
+                          ? `Show fiber ${goalBalance(dayTotals.fiber, DAILY_GOALS.fiber).label}`
+                          : 'Show fiber eaten'
                       }
                     >
                       {showEaten ? (
@@ -518,16 +544,16 @@ export default function HomeScreen() {
                         </View>
                       ) : (
                         <AnimatedNumber
-                          value={Math.max(
-                            0,
-                            Math.round(DAILY_GOALS.fiber - dayTotals.fiber),
-                          )}
+                          value={goalBalance(dayTotals.fiber, DAILY_GOALS.fiber).amount}
                           suffix="g"
                           style={styles.macroValue}
                         />
                       )}
                       <Text style={styles.macroLabel}>
-                        Fiber {showEaten ? 'eaten' : 'left'}
+                        Fiber{' '}
+                        {showEaten
+                          ? 'eaten'
+                          : goalBalance(dayTotals.fiber, DAILY_GOALS.fiber).label}
                       </Text>
                       <ProgressRing
                         size={64}
@@ -549,7 +575,9 @@ export default function HomeScreen() {
                       onPress={toggleIntakeMode}
                       accessibilityRole="button"
                       accessibilityLabel={
-                        showEaten ? 'Show sugar left' : 'Show sugar eaten'
+                        showEaten
+                          ? `Show sugar ${goalBalance(sugarIntake, DAILY_GOALS.sugar).label}`
+                          : 'Show sugar eaten'
                       }
                     >
                       {showEaten ? (
@@ -562,13 +590,16 @@ export default function HomeScreen() {
                         </View>
                       ) : (
                         <AnimatedNumber
-                          value={Math.max(0, DAILY_GOALS.sugar - sugarIntake)}
+                          value={goalBalance(sugarIntake, DAILY_GOALS.sugar).amount}
                           suffix="g"
                           style={styles.macroValue}
                         />
                       )}
                       <Text style={styles.macroLabel}>
-                        Sugar {showEaten ? 'eaten' : 'left'}
+                        Sugar{' '}
+                        {showEaten
+                          ? 'eaten'
+                          : goalBalance(sugarIntake, DAILY_GOALS.sugar).label}
                       </Text>
                       <ProgressRing
                         size={64}
@@ -590,7 +621,9 @@ export default function HomeScreen() {
                       onPress={toggleIntakeMode}
                       accessibilityRole="button"
                       accessibilityLabel={
-                        showEaten ? 'Show sodium left' : 'Show sodium eaten'
+                        showEaten
+                          ? `Show sodium ${goalBalance(sodiumIntake, DAILY_GOALS.sodium).label}`
+                          : 'Show sodium eaten'
                       }
                     >
                       {showEaten ? (
@@ -605,13 +638,16 @@ export default function HomeScreen() {
                         </View>
                       ) : (
                         <AnimatedNumber
-                          value={Math.max(0, DAILY_GOALS.sodium - sodiumIntake)}
+                          value={goalBalance(sodiumIntake, DAILY_GOALS.sodium).amount}
                           suffix="mg"
                           style={styles.macroValue}
                         />
                       )}
                       <Text style={styles.macroLabel}>
-                        Sodium {showEaten ? 'eaten' : 'left'}
+                        Sodium{' '}
+                        {showEaten
+                          ? 'eaten'
+                          : goalBalance(sodiumIntake, DAILY_GOALS.sodium).label}
                       </Text>
                       <ProgressRing
                         size={64}
@@ -655,13 +691,19 @@ export default function HomeScreen() {
             </View>
           ) : (
             <>
-              {processingJobs.map((job) => (
+              {recentJobCards.map((job) => (
                 <MealProcessingCard key={job.id} job={job} />
               ))}
               {recentMeals.map((item) => {
               const timeLabel = formatMealTime(item.createdAt);
               return (
-                <View key={item.id} style={styles.mealCard}>
+                <Pressable
+                  key={item.id}
+                  style={styles.mealCard}
+                  onPress={() => router.push(`/meal/${item.id}` as Href)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open nutrition for ${item.foodName}`}
+                >
                   {item.imageUrl ? (
                     <Image
                       source={{ uri: item.imageUrl }}
@@ -720,7 +762,7 @@ export default function HomeScreen() {
                       </View>
                     </View>
                   </View>
-                </View>
+                </Pressable>
               );
             })}
             </>
@@ -878,6 +920,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     lineHeight: 24,
   },
+  healthScoreValueOffset: {
+    transform: [{ translateX: -2 }],
+  },
   wideMetricLabel: {
     color: colors.textMuted,
     fontSize: 13,
@@ -936,10 +981,11 @@ const styles = StyleSheet.create({
     height: 7,
     borderRadius: 3.5,
     borderWidth: 1.5,
-    borderColor: colors.text,
+    borderColor: colors.border,
     backgroundColor: 'transparent',
   },
   pagerDotActive: {
+    borderColor: colors.text,
     backgroundColor: colors.text,
   },
   sectionTitle: {
@@ -986,11 +1032,11 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     flexDirection: 'row',
     overflow: 'hidden',
-    minHeight: 108,
+    height: 120,
   },
   mealThumb: {
     width: 108,
-    height: 108,
+    height: 120,
     backgroundColor: colors.surfaceElevated,
   },
   mealThumbFallback: {

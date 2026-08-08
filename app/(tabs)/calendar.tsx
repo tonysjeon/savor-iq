@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -19,6 +19,7 @@ import {
 import {
   getHistoryCacheSync,
   loadHistoryCache,
+  subscribeHistoryCache,
 } from '@/lib/userHistoryCache';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
@@ -102,6 +103,19 @@ export default function CalendarScreen() {
       );
     }
   }, []);
+
+  const applyCache = useCallback((uid: string) => {
+    const cache = getHistoryCacheSync(uid);
+    if (cache) setAnalyses(cache.analyses);
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const uid = user.uid;
+    return subscribeHistoryCache((changedUid) => {
+      if (changedUid === uid) applyCache(uid);
+    });
+  }, [user, applyCache]);
 
   useFocusEffect(
     useCallback(() => {

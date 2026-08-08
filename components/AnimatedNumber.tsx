@@ -76,6 +76,14 @@ function columnMetrics(char: string, fontSize: number) {
   };
 }
 
+/** Apply small spacing corrections for visually uneven numeral shapes. */
+function opticalKern(char: string, fontSize: number): number {
+  if (char === '1') return -Math.max(1, Math.round(fontSize * 0.07));
+  // The dot's narrow advance makes the fractional digit look crowded.
+  if (char === '.') return Math.max(1, Math.round(fontSize * 0.04));
+  return 0;
+}
+
 function EdgeFades({
   width,
   height,
@@ -117,6 +125,7 @@ function DigitColumn({
   pitch,
   clipWidth,
   fadeColor,
+  marginRight,
 }: {
   digit: string;
   textStyle: TextStyle;
@@ -124,6 +133,7 @@ function DigitColumn({
   pitch: number;
   clipWidth: number;
   fadeColor: string;
+  marginRight: number;
 }) {
   const target = Number(digit);
   const anim = useRef(new Animated.Value(target)).current;
@@ -155,7 +165,7 @@ function DigitColumn({
   const clipLeft = (pitch - clipWidth) / 2;
 
   return (
-    <View style={{ height, width: pitch }}>
+    <View style={{ height, width: pitch, marginRight }}>
       <View
         style={{
           position: 'absolute',
@@ -217,12 +227,19 @@ export function AnimatedNumber({
   return (
     <View style={styles.row} accessibilityLabel={`${formatted}${suffix}`}>
       {segments.map((segment) => {
+        const marginRight = opticalKern(segment.char, fontSize);
         if (!segment.animate) {
           const { pitch } = columnMetrics(segment.char, fontSize);
           return (
             <View
               key={segment.key}
-              style={{ width: pitch, height, justifyContent: 'center', alignItems: 'center' }}
+              style={{
+                width: pitch,
+                height,
+                marginRight,
+                justifyContent: 'center',
+                alignItems: 'center',
+              }}
             >
               <Text style={textStyle}>{segment.char}</Text>
             </View>
@@ -238,6 +255,7 @@ export function AnimatedNumber({
             pitch={pitch}
             clipWidth={clipWidth}
             fadeColor={fadeColor}
+            marginRight={marginRight}
           />
         );
       })}

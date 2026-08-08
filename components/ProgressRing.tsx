@@ -13,6 +13,7 @@ type ProgressRingProps = {
   trackColor?: string;
   children?: ReactNode;
   style?: ViewStyle;
+  animationDuration?: number;
 };
 
 export function ProgressRing({
@@ -23,6 +24,7 @@ export function ProgressRing({
   trackColor = '#E8E8E8',
   children,
   style,
+  animationDuration = 500,
 }: ProgressRingProps) {
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
@@ -50,7 +52,7 @@ export function ProgressRing({
       hasMounted.current = true;
       lastProgress.current = clamped;
       animatedProgress.setValue(0);
-      run(clamped, 700, Easing.out(Easing.cubic));
+      run(clamped, animationDuration + 100, Easing.out(Easing.cubic));
       return;
     }
 
@@ -62,10 +64,10 @@ export function ProgressRing({
     const emptying = clamped === 0 && from > 0;
     run(
       clamped,
-      emptying ? 380 : 450,
-      emptying ? Easing.inOut(Easing.quad) : Easing.inOut(Easing.cubic),
+      emptying ? animationDuration * 0.76 : animationDuration,
+      Easing.inOut(Easing.sin),
     );
-  }, [clamped, animatedProgress]);
+  }, [animationDuration, clamped, animatedProgress]);
 
   const strokeDashoffset = animatedProgress.interpolate({
     inputRange: [0, 1],

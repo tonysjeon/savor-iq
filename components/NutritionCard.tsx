@@ -12,6 +12,8 @@ const MACRO_COLORS = {
   carbs: '#64B5F6',
   fat: '#FFD54F',
   fiber: '#81C784',
+  sugar: '#F48FB1',
+  sodium: '#90A4AE',
 } as const;
 
 function healthScoreColor(score: number): string {
@@ -22,13 +24,16 @@ function healthScoreColor(score: number): string {
 
 export function NutritionCard({ info }: NutritionCardProps) {
   const { protein, carbs, fat, fiber } = info.macros;
-  const total = protein + carbs + fat + fiber || 1;
+  const sugar = info.macros.sugar ?? 0;
+  const sodium = info.macros.sodium ?? 0;
+  const total = protein + carbs + fat + fiber + sugar || 1;
 
   const macros = [
     { key: 'protein', label: 'Protein', value: protein, color: MACRO_COLORS.protein },
     { key: 'carbs', label: 'Carbs', value: carbs, color: MACRO_COLORS.carbs },
     { key: 'fat', label: 'Fat', value: fat, color: MACRO_COLORS.fat },
     { key: 'fiber', label: 'Fiber', value: fiber, color: MACRO_COLORS.fiber },
+    { key: 'sugar', label: 'Sugar', value: sugar, color: MACRO_COLORS.sugar },
   ] as const;
 
   return (
@@ -71,6 +76,12 @@ export function NutritionCard({ info }: NutritionCardProps) {
             </View>
           </View>
         ))}
+      </View>
+
+      <View style={styles.sodiumRow}>
+        <View style={[styles.dot, { backgroundColor: MACRO_COLORS.sodium }]} />
+        <Text style={styles.macroLabel}>Sodium</Text>
+        <Text style={styles.macroValue}>{sodium}mg</Text>
       </View>
 
       {info.description ? (
@@ -143,6 +154,12 @@ const styles = StyleSheet.create({
   },
   macroRow: {
     gap: 6,
+  },
+  sodiumRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
   },
   macroLabelRow: {
     flexDirection: 'row',
