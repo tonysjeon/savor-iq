@@ -1,7 +1,9 @@
 import {
   addDoc,
   collection,
+  deleteDoc,
   doc,
+  getDoc,
   getDocs,
   limit,
   orderBy,
@@ -15,6 +17,7 @@ import { db, storage } from '@/lib/firebase';
 import {
   prependCachedAnalysis,
   prependCachedRecipe,
+  removeCachedAnalysis,
   setCachedAnalyses,
   setCachedRecipes,
   getHistoryCacheSync,
@@ -119,10 +122,24 @@ function parseNutrition(
       carbs: typeof macros.carbs === 'number' ? macros.carbs : 0,
       fat: typeof macros.fat === 'number' ? macros.fat : 0,
       fiber: typeof macros.fiber === 'number' ? macros.fiber : 0,
+      sugar: typeof macros.sugar === 'number' ? macros.sugar : 0,
+      sodium: typeof macros.sodium === 'number' ? macros.sodium : 0,
     },
     healthScore: typeof data.healthScore === 'number' ? data.healthScore : 0,
     description: typeof data.description === 'string' ? data.description : '',
     nutritionTips: asStringArray(data.nutritionTips),
+    foodPresenceConfidence:
+      typeof data.foodPresenceConfidence === 'number'
+        ? data.foodPresenceConfidence
+        : undefined,
+    identificationConfidence:
+      typeof data.identificationConfidence === 'number'
+        ? data.identificationConfidence
+        : undefined,
+    remainingFraction:
+      typeof data.remainingFraction === 'number'
+        ? data.remainingFraction
+        : undefined,
     imageUrl: typeof data.imageUrl === 'string' ? data.imageUrl : undefined,
     createdAt:
       toMillis(data.createdAtMs) ?? toMillis(data.createdAt),
@@ -205,6 +222,15 @@ export async function saveNutritionAnalysis(
     healthScore: info.healthScore,
     description: info.description,
     nutritionTips: info.nutritionTips,
+    ...(info.foodPresenceConfidence != null
+      ? { foodPresenceConfidence: info.foodPresenceConfidence }
+      : {}),
+    ...(info.identificationConfidence != null
+      ? { identificationConfidence: info.identificationConfidence }
+      : {}),
+    ...(info.remainingFraction != null
+      ? { remainingFraction: info.remainingFraction }
+      : {}),
     ...(imageUrl ? { imageUrl } : {}),
     createdAt: serverTimestamp(),
     createdAtMs,
@@ -223,6 +249,32 @@ export async function saveNutritionAnalysis(
     });
   }
   return docRef.id;
+}
+
+export async function getNutritionAnalysis(
+  uid: string,
+  analysisId: string,
+): Promise<SavedNutrition | null> {
+  const firestore = requireDb();
+  const snapshot = await getDoc(
+    doc(firestore, 'users', uid, 'analyses', analysisId),
+  );
+  if (!snapshot.exists()) return null;
+  return parseNutrition(snapshot.id, snapshot.data() as Record<string, unknown>);
+}
+
+export async function deleteNutritionAnalysis(
+  uid: string,
+  analysisId: string,
+): Promise<void> {
+  const firestore = requireDb();
+  if (
+    !analysisId.startsWith('processing-') &&
+    !analysisId.startsWith('pending-')
+  ) {
+    await deleteDoc(doc(firestore, 'users', uid, 'analyses', analysisId));
+  }
+  await removeCachedAnalysis(uid, analysisId);
 }
 
 export async function listNutritionAnalyses(

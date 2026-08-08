@@ -6,7 +6,7 @@ import {
   getReactNativePersistence,
   initializeAuth,
 } from 'firebase/auth';
-import { Firestore, getFirestore } from 'firebase/firestore';
+import { Firestore, initializeFirestore } from 'firebase/firestore';
 import { FirebaseStorage, getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
@@ -41,7 +41,12 @@ if (isFirebaseConfigured) {
     auth = getAuth(app);
   }
 
-  db = getFirestore(app);
+  // Expo uses Firebase's JavaScript client, whose default WebChannel stream can
+  // be interrupted by some mobile networks and proxies. Let Firestore detect
+  // and switch to long polling when that transport is more reliable.
+  db = initializeFirestore(app, {
+    experimentalAutoDetectLongPolling: true,
+  });
   storage = getStorage(app);
 }
 

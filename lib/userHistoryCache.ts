@@ -75,6 +75,15 @@ export async function saveHistoryCache(
   return merged;
 }
 
+export function getCachedAnalysis(
+  uid: string,
+  analysisId: string,
+): SavedNutrition | null {
+  const cache = memory.get(uid);
+  if (!cache) return null;
+  return cache.analyses.find((item) => item.id === analysisId) ?? null;
+}
+
 export async function setCachedRecipes(
   uid: string,
   recipes: SavedRecipe[],
@@ -108,14 +117,17 @@ export function mergeAnalysesWithPending(
   network: SavedNutrition[],
   existing: SavedNutrition[] | undefined,
 ): SavedNutrition[] {
-  const pending = (existing ?? []).filter((item) => item.id.startsWith('pending-'));
-  if (pending.length === 0) return network;
+  const transient = (existing ?? []).filter(
+    (item) =>
+      item.id.startsWith('pending-') || item.id.startsWith('processing-'),
+  );
+  if (transient.length === 0) return network;
 
   const networkFingerprints = new Set(network.map(analysisFingerprint));
-  const keepPending = pending.filter(
+  const keepTransient = transient.filter(
     (item) => !networkFingerprints.has(analysisFingerprint(item)),
   );
-  return [...keepPending, ...network];
+  return [...keepTransient, ...network];
 }
 
 /** Drop accidental duplicate meals (pending+saved, or double cloud writes). */
@@ -135,8 +147,12 @@ export function dedupeAnalyses(items: SavedNutrition[]): SavedNutrition[] {
 
     if (duplicateIndex >= 0) {
       const duplicate = kept[duplicateIndex];
-      // Prefer a real Firestore doc over a local pending placeholder.
-      if (duplicate.id.startsWith('pending-') && !item.id.startsWith('pending-')) {
+      // Prefer a real Firestore document over any local in-flight placeholder.
+      const duplicateIsTransient =
+        duplicate.id.startsWith('pending-') || duplicate.id.startsWith('processing-');
+      const itemIsTransient =
+        item.id.startsWith('pending-') || item.id.startsWith('processing-');
+      if (duplicateIsTransient && !itemIsTransient) {
         kept[duplicateIndex] = item;
         seenIds.add(item.id);
       }
@@ -169,12 +185,31 @@ export async function prependCachedAnalysis(
   max = 20,
 ): Promise<void> {
   const current = (await loadHistoryCache(uid)) ?? emptyCache();
-  const existing = analysis.id.startsWith('pending-')
+  const isTransient =
+    analysis.id.startsWith('pending-') || analysis.id.startsWith('processing-');
+  const existing = isTransient
     ? current.analyses
-    : current.analyses.filter((item) => !item.id.startsWith('pending-'));
+    : current.analyses.filter(
+        (item) =>
+          !(
+            (item.id.startsWith('pending-') || item.id.startsWith('processing-')) &&
+            analysisFingerprint(item) === analysisFingerprint(analysis)
+          ),
+      );
   const analyses = [
     analysis,
     ...existing.filter((item) => item.id !== analysis.id),
   ].slice(0, max);
   await setCachedAnalyses(uid, analyses);
+}
+
+export async function removeCachedAnalysis(
+  uid: string,
+  analysisId: string,
+): Promise<void> {
+  const current = (await loadHistoryCache(uid)) ?? emptyCache();
+  await setCachedAnalyses(
+    uid,
+    current.analyses.filter((item) => item.id !== analysisId),
+  );
 }

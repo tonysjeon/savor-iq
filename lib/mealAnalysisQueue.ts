@@ -1,6 +1,7 @@
 import type { CapturedMealPhoto } from '@/components/MealCamera';
 import type { AnalyzeSource } from '@/lib/analyzeSession';
 import {
+  deleteNutritionAnalysis,
   saveNutritionAnalysis,
   type SavedNutrition,
 } from '@/lib/firestore';
@@ -8,7 +9,7 @@ import {
   analyzeNutritionFromImage,
   isFoodNotDetectedError,
 } from '@/lib/gemini';
-import { prepareMealPhotoForAnalysis } from '@/lib/mealPhoto';
+import { prepareMealPhotos } from '@/lib/mealPhoto';
 import { prependCachedAnalysis } from '@/lib/userHistoryCache';
 
 export type MealAnalysisJobStatus = 'processing' | 'ready' | 'error';
@@ -23,6 +24,10 @@ export type MealAnalysisJob = {
   createdAt: number;
   error?: string;
   errorKind?: MealAnalysisErrorKind;
+  /** Persistence failed after a successful on-device analysis. */
+  saveError?: string;
+  /** Staged upload/analysis progress from 0 to 100. */
+  progress: number;
   /** Filled when analysis completes — same card flips from skeleton to this. */
   result?: SavedNutrition;
 };
@@ -67,7 +72,17 @@ export function getMealAnalysisJob(id: string): MealAnalysisJob | null {
 export function pruneReadyJobs(savedIds: Set<string>): void {
   let changed = false;
   for (const [id, job] of jobs) {
-    if (job.status === 'ready' && job.result && savedIds.has(job.result.id)) {
+    const resultId = job.result?.id;
+    const isPersisted =
+      resultId != null &&
+      !resultId.startsWith('processing-') &&
+      !resultId.startsWith('pending-');
+    if (
+      job.status === 'ready' &&
+      resultId &&
+      isPersisted &&
+      savedIds.has(resultId)
+    ) {
       jobs.delete(id);
       changed = true;
     }
@@ -87,30 +102,35 @@ async function runJob(id: string): Promise<void> {
     error: undefined,
     errorKind: undefined,
     result: undefined,
+    saveError: undefined,
+    progress: 10,
   });
 
   try {
     const latest = jobs.get(id) ?? job;
-    const prepared = await prepareMealPhotoForAnalysis(latest.photo);
+    const prepared = await prepareMealPhotos(latest.photo);
     if (!jobs.has(id)) return;
 
     setJob({
       ...latest,
-      photo: prepared,
       status: 'processing',
       error: undefined,
       errorKind: undefined,
       result: undefined,
+      saveError: undefined,
+      progress: 30,
     });
 
     const info = await analyzeNutritionFromImage(
-      prepared.base64,
-      prepared.mimeType,
+      prepared.analysis.base64,
+      prepared.analysis.mimeType,
     );
     if (!jobs.has(id)) return;
 
     const userId = jobs.get(id)?.userId ?? latest.userId;
-    const imageUrl = prepared.uri;
+    // Keep the same local source through the processing-to-saved card swap so
+    // React Native does not briefly clear and reload the thumbnail.
+    const imageUrl = latest.photo.uri;
     const createdAtMs = Date.now();
 
     // Fill the same card immediately; persist in the background after.
@@ -122,22 +142,37 @@ async function runJob(id: string): Promise<void> {
     };
     setJob({
       ...(jobs.get(id) ?? latest),
-      photo: prepared,
       status: 'ready',
       error: undefined,
       errorKind: undefined,
       result: provisional,
+      saveError: undefined,
+      progress: 75,
     });
 
     if (!userId) return;
+    // Publish the estimate immediately so Home and Calendar totals update while
+    // the cloud image/document upload completes.
+    await prependCachedAnalysis(userId, provisional);
+    if (!jobs.has(id)) return;
+
+    // Analysis is complete and the meal is now available throughout the app.
+    // Cloud persistence continues in the background and must not hold the
+    // user-facing processing indicator below 100%.
+    setJob({ ...(jobs.get(id) ?? latest), progress: 100 });
 
     try {
       const docId = await saveNutritionAnalysis(userId, info, {
-        imageBase64: prepared.base64,
-        localImageUri: prepared.uri,
+        imageBase64: prepared.display.base64,
+        localImageUri: prepared.display.uri,
         skipCache: true,
       });
-      if (!jobs.has(id)) return;
+      if (!jobs.has(id)) {
+        // The user deleted the temporary meal while its cloud save was in
+        // flight. Remove the just-created document instead of resurrecting it.
+        await deleteNutritionAnalysis(userId, docId);
+        return;
+      }
 
       const saved: SavedNutrition = {
         ...provisional,
@@ -146,27 +181,34 @@ async function runJob(id: string): Promise<void> {
       };
       setJob({
         ...(jobs.get(id) ?? latest),
-        photo: prepared,
         status: 'ready',
         error: undefined,
         errorKind: undefined,
         result: saved,
+        saveError: undefined,
+        progress: 100,
       });
       await prependCachedAnalysis(userId, saved);
     } catch (saveErr) {
       const current = jobs.get(id);
       if (!current) return;
-      // Keep the filled card visible; surface save failure only if we never showed food.
-      if (current.status !== 'ready' || !current.result) {
+      const message =
+        saveErr instanceof Error ? saveErr.message : 'Could not save meal.';
+      // Keep the analysis result visible, but do not silently hide a cloud
+      // persistence failure behind an otherwise successful card.
+      if (current.status === 'ready' && current.result) {
+        setJob({ ...current, saveError: message });
+      } else {
         setJob({
           ...current,
           status: 'error',
-          error:
-            saveErr instanceof Error ? saveErr.message : 'Could not save meal.',
+          error: message,
           errorKind: 'generic',
           result: undefined,
         });
       }
+      // Keep the completed local meal in Home and Calendar. A cloud transport
+      // failure should not make an already processed meal disappear.
     }
   } catch (err) {
     const current = jobs.get(id);
@@ -176,7 +218,7 @@ async function runJob(id: string): Promise<void> {
       ...current,
       status: 'error',
       error: foodNotDetected
-        ? 'Food not detected'
+        ? 'No Food Detected'
         : err instanceof Error
           ? err.message
           : 'Analysis failed.',
@@ -202,6 +244,7 @@ export function enqueueMealAnalysis(params: {
     source: params.source,
     userId: params.userId,
     createdAt: Date.now(),
+    progress: 5,
   };
   setJob(job);
   void runJob(id);
