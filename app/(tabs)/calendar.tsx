@@ -1,6 +1,5 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -20,6 +19,7 @@ import {
 import {
   getHistoryCacheSync,
   loadHistoryCache,
+  subscribeHistoryCache,
 } from '@/lib/userHistoryCache';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
@@ -90,8 +90,6 @@ export default function CalendarScreen() {
   );
   const [selected, setSelected] = useState<Date | null>(() => today);
   const [analyses, setAnalyses] = useState<SavedNutrition[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [hydrated, setHydrated] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refreshFromNetwork = useCallback(async (uid: string) => {
@@ -103,52 +101,49 @@ export default function CalendarScreen() {
       setError(
         err instanceof Error ? err.message : 'Could not load meal history.',
       );
-    } finally {
-      setLoading(false);
     }
   }, []);
 
+  const applyCache = useCallback((uid: string) => {
+    const cache = getHistoryCacheSync(uid);
+    if (cache) setAnalyses(cache.analyses);
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const uid = user.uid;
+    return subscribeHistoryCache((changedUid) => {
+      if (changedUid === uid) applyCache(uid);
+    });
+  }, [user, applyCache]);
+
   useFocusEffect(
     useCallback(() => {
-      if (!user) return;
+      if (!user) {
+        setAnalyses([]);
+        return;
+      }
       const uid = user.uid;
       let active = true;
 
-      const syncCache = getHistoryCacheSync(uid);
-      if (syncCache) {
-        setAnalyses(syncCache.analyses);
-        setLoading(false);
-        setHydrated(true);
-        return () => {
-          active = false;
-        };
-      }
-
-      if (hydrated) {
-        return () => {
-          active = false;
-        };
-      }
-
-      async function hydrate() {
-        setLoading(true);
-        const disk = await loadHistoryCache(uid);
-        if (!active) return;
-        if (disk) {
-          setAnalyses(disk.analyses);
-          setLoading(false);
-          setHydrated(true);
-          return;
+      async function load() {
+        const syncCache = getHistoryCacheSync(uid);
+        if (syncCache) {
+          setAnalyses(syncCache.analyses);
+        } else {
+          const disk = await loadHistoryCache(uid);
+          if (!active) return;
+          setAnalyses(disk?.analyses ?? []);
         }
-        await refreshFromNetwork(uid);
-        if (active) setHydrated(true);
+
+        void refreshFromNetwork(uid);
       }
 
-      void hydrate();
+      void load();
       return () => {
         active = false;
       };
-    }, [user, hydrated, refreshFromNetwork]),
+    }, [user, refreshFromNetwork]),
   );
 
   const year = cursor.getFullYear();
@@ -233,10 +228,7 @@ export default function CalendarScreen() {
         ))}
       </View>
 
-      {loading ? (
-        <ActivityIndicator color={colors.text} style={styles.loader} />
-      ) : (
-        <View style={styles.grid}>
+      <View style={styles.grid}>
           {weeks.map((week, weekIndex) => (
             <View key={`w-${weekIndex}`} style={styles.weekRow}>
               {week.map((day, dayIndex) => {
@@ -279,8 +271,7 @@ export default function CalendarScreen() {
               })}
             </View>
           ))}
-        </View>
-      )}
+      </View>
 
       {selected ? (
         <View style={styles.detail}>
@@ -376,9 +367,6 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 12,
     fontWeight: '600',
-  },
-  loader: {
-    marginVertical: 24,
   },
   grid: {
     gap: 4,

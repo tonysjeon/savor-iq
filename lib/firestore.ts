@@ -1,7 +1,9 @@
 import {
   addDoc,
   collection,
+  deleteDoc,
   doc,
+  getDoc,
   getDocs,
   limit,
   orderBy,
@@ -9,13 +11,18 @@ import {
   serverTimestamp,
   setDoc,
 } from 'firebase/firestore';
+import { getDownloadURL, ref, uploadString } from 'firebase/storage';
 
-import { db } from '@/lib/firebase';
+import { db, storage } from '@/lib/firebase';
 import {
   prependCachedAnalysis,
   prependCachedRecipe,
+  removeCachedAnalysis,
   setCachedAnalyses,
   setCachedRecipes,
+  getHistoryCacheSync,
+  mergeAnalysesWithPending,
+  dedupeAnalyses,
 } from '@/lib/userHistoryCache';
 import type { NutritionInfo } from '@/types/nutrition';
 import type { Recipe } from '@/types/recipe';
@@ -26,6 +33,13 @@ export type SavedNutrition = NutritionInfo & {
   createdAt: number | null;
 };
 
+export type SaveNutritionOptions = {
+  imageBase64?: string;
+  localImageUri?: string;
+  /** When true, write Firestore only — caller updates local cache after UI handoff. */
+  skipCache?: boolean;
+};
+
 function requireDb() {
   if (!db) {
     throw new Error(
@@ -33,6 +47,20 @@ function requireDb() {
     );
   }
   return db;
+}
+
+async function uploadMealImage(uid: string, base64: string): Promise<string | null> {
+  if (!storage) return null;
+  try {
+    const path = `users/${uid}/meals/${Date.now()}.jpg`;
+    const objectRef = ref(storage, path);
+    await uploadString(objectRef, base64, 'base64', {
+      contentType: 'image/jpeg',
+    });
+    return await getDownloadURL(objectRef);
+  } catch {
+    return null;
+  }
 }
 
 function asStringArray(value: unknown): string[] {
@@ -94,11 +122,27 @@ function parseNutrition(
       carbs: typeof macros.carbs === 'number' ? macros.carbs : 0,
       fat: typeof macros.fat === 'number' ? macros.fat : 0,
       fiber: typeof macros.fiber === 'number' ? macros.fiber : 0,
+      sugar: typeof macros.sugar === 'number' ? macros.sugar : 0,
+      sodium: typeof macros.sodium === 'number' ? macros.sodium : 0,
     },
     healthScore: typeof data.healthScore === 'number' ? data.healthScore : 0,
     description: typeof data.description === 'string' ? data.description : '',
     nutritionTips: asStringArray(data.nutritionTips),
-    createdAt: toMillis(data.createdAt),
+    foodPresenceConfidence:
+      typeof data.foodPresenceConfidence === 'number'
+        ? data.foodPresenceConfidence
+        : undefined,
+    identificationConfidence:
+      typeof data.identificationConfidence === 'number'
+        ? data.identificationConfidence
+        : undefined,
+    remainingFraction:
+      typeof data.remainingFraction === 'number'
+        ? data.remainingFraction
+        : undefined,
+    imageUrl: typeof data.imageUrl === 'string' ? data.imageUrl : undefined,
+    createdAt:
+      toMillis(data.createdAtMs) ?? toMillis(data.createdAt),
   };
 }
 
@@ -160,23 +204,77 @@ export async function listRecipes(
 export async function saveNutritionAnalysis(
   uid: string,
   info: NutritionInfo,
+  options: SaveNutritionOptions = {},
 ): Promise<string> {
   const firestore = requireDb();
-  const ref = await addDoc(collection(firestore, 'users', uid, 'analyses'), {
+
+  let imageUrl = options.localImageUri || info.imageUrl || '';
+  if (options.imageBase64) {
+    const uploaded = await uploadMealImage(uid, options.imageBase64);
+    if (uploaded) imageUrl = uploaded;
+  }
+
+  const createdAtMs = Date.now();
+  const payload = {
     foodName: info.foodName,
     calories: info.calories,
     macros: info.macros,
     healthScore: info.healthScore,
     description: info.description,
     nutritionTips: info.nutritionTips,
+    ...(info.foodPresenceConfidence != null
+      ? { foodPresenceConfidence: info.foodPresenceConfidence }
+      : {}),
+    ...(info.identificationConfidence != null
+      ? { identificationConfidence: info.identificationConfidence }
+      : {}),
+    ...(info.remainingFraction != null
+      ? { remainingFraction: info.remainingFraction }
+      : {}),
+    ...(imageUrl ? { imageUrl } : {}),
     createdAt: serverTimestamp(),
-  });
-  await prependCachedAnalysis(uid, {
-    ...info,
-    id: ref.id,
-    createdAt: Date.now(),
-  });
-  return ref.id;
+    createdAtMs,
+  };
+
+  const docRef = await addDoc(
+    collection(firestore, 'users', uid, 'analyses'),
+    payload,
+  );
+  if (!options.skipCache) {
+    await prependCachedAnalysis(uid, {
+      ...info,
+      id: docRef.id,
+      imageUrl: imageUrl || undefined,
+      createdAt: createdAtMs,
+    });
+  }
+  return docRef.id;
+}
+
+export async function getNutritionAnalysis(
+  uid: string,
+  analysisId: string,
+): Promise<SavedNutrition | null> {
+  const firestore = requireDb();
+  const snapshot = await getDoc(
+    doc(firestore, 'users', uid, 'analyses', analysisId),
+  );
+  if (!snapshot.exists()) return null;
+  return parseNutrition(snapshot.id, snapshot.data() as Record<string, unknown>);
+}
+
+export async function deleteNutritionAnalysis(
+  uid: string,
+  analysisId: string,
+): Promise<void> {
+  const firestore = requireDb();
+  if (
+    !analysisId.startsWith('processing-') &&
+    !analysisId.startsWith('pending-')
+  ) {
+    await deleteDoc(doc(firestore, 'users', uid, 'analyses', analysisId));
+  }
+  await removeCachedAnalysis(uid, analysisId);
 }
 
 export async function listNutritionAnalyses(
@@ -198,6 +296,8 @@ export async function listNutritionAnalyses(
     )
     .filter((item): item is SavedNutrition => item !== null);
 
-  await setCachedAnalyses(uid, analyses);
-  return analyses;
+  const existing = getHistoryCacheSync(uid)?.analyses;
+  const merged = dedupeAnalyses(mergeAnalysesWithPending(analyses, existing));
+  await setCachedAnalyses(uid, merged);
+  return merged;
 }

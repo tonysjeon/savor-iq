@@ -1,7 +1,7 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   Dimensions,
+  Image,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Pressable,
@@ -12,11 +12,13 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { router, type Href } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import Svg, { Ellipse, Path } from 'react-native-svg';
-
+import { AvocadoIcon } from '@/components/AvocadoIcon';
+import { AnimatedNumber } from '@/components/AnimatedNumber';
 import { ProgressRing } from '@/components/ProgressRing';
+import { MealProcessingCard } from '@/components/MealProcessingCard';
 import { useAuth } from '@/context/AuthContext';
 import { colors } from '@/constants/theme';
 import {
@@ -24,8 +26,17 @@ import {
   type SavedNutrition,
 } from '@/lib/firestore';
 import {
+  listMealAnalysisJobs,
+  pruneReadyJobs,
+  subscribeMealAnalysisJobs,
+  type MealAnalysisJob,
+} from '@/lib/mealAnalysisQueue';
+import {
   getHistoryCacheSync,
   loadHistoryCache,
+  subscribeHistoryCache,
+  dedupeAnalyses,
+  analysisFingerprint,
 } from '@/lib/userHistoryCache';
 
 const WEEKDAY_LABELS = ['Su', 'M', 'Tu', 'W', 'Th', 'F', 'Sa'] as const;
@@ -59,25 +70,17 @@ const MACRO_META = [
   {
     key: 'fat' as const,
     label: 'Fat',
-    color: '#64B5F6',
+    color: '#66BB6A',
   },
 ] as const;
 
-function AvocadoIcon({ size }: { size: number }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" pointerEvents="none">
-      <Path
-        d="M12 1.5c-2.4 0-4.3 1.9-4.7 4.4C6.7 9.5 6.2 13.2 6.8 16.2 7.4 19.4 9.5 21.5 12 21.5s4.6-2.1 5.2-5.3c.6-3 .1-6.7-.5-10.3C16.3 3.4 14.4 1.5 12 1.5z"
-        fill="#689F38"
-      />
-      <Path
-        d="M12 3.4c-1.6 0-2.9 1.3-3.2 3.1-.5 3-.9 6-.4 8.4.4 2.3 1.9 3.9 3.6 3.9s3.2-1.6 3.6-3.9c.5-2.4.1-5.4-.4-8.4C14.9 4.7 13.6 3.4 12 3.4z"
-        fill="#C5E1A5"
-      />
-      <Ellipse cx="12" cy="14.2" rx="2.8" ry="3.3" fill="#5D4037" />
-      <Ellipse cx="12.8" cy="13.2" rx="0.85" ry="1.05" fill="#A1887F" opacity={0.8} />
-    </Svg>
-  );
+function goalBalance(intake: number, goal: number) {
+  const roundedIntake = Math.round(intake);
+  const over = roundedIntake > goal;
+  return {
+    amount: Math.abs(goal - roundedIntake),
+    label: over ? 'over' : 'left',
+  } as const;
 }
 
 function startOfDay(date: Date): number {
@@ -112,6 +115,8 @@ function sumForDay(analyses: SavedNutrition[], day: Date) {
         carbs: acc.carbs + item.macros.carbs,
         fat: acc.fat + item.macros.fat,
         fiber: acc.fiber + item.macros.fiber,
+        sugar: acc.sugar + (item.macros.sugar ?? 0),
+        sodium: acc.sodium + (item.macros.sodium ?? 0),
         healthScore: acc.healthScore + item.healthScore,
         count: acc.count + 1,
       }),
@@ -121,16 +126,20 @@ function sumForDay(analyses: SavedNutrition[], day: Date) {
         carbs: 0,
         fat: 0,
         fiber: 0,
+        sugar: 0,
+        sodium: 0,
         healthScore: 0,
         count: 0,
       },
     );
 }
 
-function mealsForDay(analyses: SavedNutrition[], day: Date): SavedNutrition[] {
-  return analyses.filter(
-    (item) => item.createdAt != null && sameDay(new Date(item.createdAt), day),
-  );
+function formatMealTime(createdAt: number | null): string {
+  if (createdAt == null) return '';
+  return new Date(createdAt).toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }
 
 export default function HomeScreen() {
@@ -139,8 +148,7 @@ export default function HomeScreen() {
   const today = useMemo(() => new Date(), []);
   const [selectedDay, setSelectedDay] = useState(() => today);
   const [analyses, setAnalyses] = useState<SavedNutrition[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [hydrated, setHydrated] = useState(false);
+  const [processingJobs, setProcessingJobs] = useState<MealAnalysisJob[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pagerPage, setPagerPage] = useState(0);
   const [showEaten, setShowEaten] = useState(false);
@@ -149,60 +157,78 @@ export default function HomeScreen() {
     setError(null);
     try {
       const next = await listNutritionAnalyses(uid, 100);
-      setAnalyses(next);
+      setAnalyses(dedupeAnalyses(next));
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Could not load meal history.',
       );
-    } finally {
-      setLoading(false);
     }
   }, []);
 
+  const applyCache = useCallback((uid: string) => {
+    const syncCache = getHistoryCacheSync(uid);
+    if (syncCache) {
+      setAnalyses(dedupeAnalyses(syncCache.analyses));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const uid = user.uid;
+    return subscribeHistoryCache((changedUid) => {
+      if (changedUid !== uid) return;
+      applyCache(uid);
+    });
+  }, [user, applyCache]);
+
+  useEffect(() => {
+    setProcessingJobs(listMealAnalysisJobs());
+    return subscribeMealAnalysisJobs(() => {
+      setProcessingJobs(listMealAnalysisJobs());
+    });
+  }, []);
+
+  useEffect(() => {
+    const savedIds = new Set(analyses.map((item) => item.id));
+    pruneReadyJobs(savedIds);
+  }, [analyses]);
+
   useFocusEffect(
     useCallback(() => {
-      if (!user) return;
+      if (!user) {
+        setAnalyses([]);
+        return;
+      }
       const uid = user.uid;
       let active = true;
 
-      const syncCache = getHistoryCacheSync(uid);
-      if (syncCache) {
-        setAnalyses(syncCache.analyses);
-        setLoading(false);
-        setHydrated(true);
-        return () => {
-          active = false;
-        };
-      }
-
-      if (hydrated) {
-        return () => {
-          active = false;
-        };
-      }
-
-      async function hydrate() {
-        setLoading(true);
+      async function load() {
+        applyCache(uid);
         const disk = await loadHistoryCache(uid);
         if (!active) return;
-
         if (disk) {
-          setAnalyses(disk.analyses);
-          setLoading(false);
-          setHydrated(true);
-          return;
+          setAnalyses(dedupeAnalyses(disk.analyses));
         }
 
         await refreshFromNetwork(uid);
-        if (active) setHydrated(true);
+        if (!active) return;
+        // Pick up any meal saved while the network request was in flight.
+        applyCache(uid);
       }
 
-      void hydrate();
+      void load();
+
+      const retry = setTimeout(() => {
+        if (!active) return;
+        applyCache(uid);
+        void refreshFromNetwork(uid);
+      }, 2000);
 
       return () => {
         active = false;
+        clearTimeout(retry);
       };
-    }, [user, hydrated, refreshFromNetwork]),
+    }, [user, refreshFromNetwork, applyCache]),
   );
 
   const days = useMemo(() => weekDaysAround(today), [today]);
@@ -210,19 +236,47 @@ export default function HomeScreen() {
     () => sumForDay(analyses, selectedDay),
     [analyses, selectedDay],
   );
-  const dayMeals = useMemo(
-    () => mealsForDay(analyses, selectedDay),
-    [analyses, selectedDay],
+  const recentJobCards = useMemo(
+    () => processingJobs.slice(0, 10),
+    [processingJobs],
   );
+  const recentMeals = useMemo(() => {
+    const jobResultIds = new Set(
+      processingJobs
+        .map((job) => job.result?.id)
+        .filter((id): id is string => Boolean(id)),
+    );
+    const jobFingerprints = new Set(
+      processingJobs
+        .map((job) => (job.result ? analysisFingerprint(job.result) : null))
+        .filter((fp): fp is string => Boolean(fp)),
+    );
 
-  const caloriesLeft = Math.max(0, Math.round(DAILY_GOALS.calories - dayTotals.calories));
+    return [...analyses]
+      .filter((item) => {
+        if (jobResultIds.has(item.id)) return false;
+        if (jobFingerprints.has(analysisFingerprint(item))) return false;
+
+        // Hide cloud rows that land while this job is still analyzing/saving.
+        for (const job of processingJobs) {
+          if (job.status !== 'processing') continue;
+          if (item.createdAt == null) continue;
+          if (item.createdAt >= job.createdAt - 2000) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+      .slice(0, Math.max(0, 10 - recentJobCards.length));
+  }, [analyses, processingJobs, recentJobCards.length]);
+  const hasRecentSection = recentJobCards.length > 0 || recentMeals.length > 0;
+
   const caloriesEaten = Math.round(dayTotals.calories);
+  const calorieBalance = goalBalance(caloriesEaten, DAILY_GOALS.calories);
   const calorieProgress = dayTotals.calories / DAILY_GOALS.calories;
   const avgHealthScore =
     dayTotals.count > 0 ? dayTotals.healthScore / dayTotals.count : 0;
-  // Sugar, sodium, and water are not tracked from meal analyses yet.
-  const sugarIntake = 0;
-  const sodiumIntake = 0;
+  const sugarIntake = Math.round(dayTotals.sugar);
+  const sodiumIntake = Math.round(dayTotals.sodium);
   const waterIntake = 0;
 
   function toggleIntakeMode() {
@@ -251,6 +305,7 @@ export default function HomeScreen() {
       <View style={styles.weekRow}>
         {days.map((day) => {
           const selected = sameDay(day, selectedDay);
+          const isToday = sameDay(day, today);
           const weekday = WEEKDAY_LABELS[day.getDay()];
           return (
             <Pressable
@@ -261,7 +316,13 @@ export default function HomeScreen() {
               <Text style={[styles.dayWeekday, selected && styles.dayWeekdaySelected]}>
                 {weekday}
               </Text>
-              <View style={[styles.dayCircle, selected && styles.dayCircleSelected]}>
+              <View
+                style={[
+                  styles.dayCircle,
+                  selected && styles.dayCircleSelected,
+                  isToday && !selected && styles.dayCircleToday,
+                ]}
+              >
                 <Text style={[styles.dayNumber, selected && styles.dayNumberSelected]}>
                   {day.getDate()}
                 </Text>
@@ -271,10 +332,6 @@ export default function HomeScreen() {
         })}
       </View>
 
-      {loading ? (
-        <ActivityIndicator color={colors.text} style={styles.loader} />
-      ) : (
-        <>
           <View style={styles.pager}>
             <ScrollView
               horizontal
@@ -300,23 +357,33 @@ export default function HomeScreen() {
                     onPress={toggleIntakeMode}
                     accessibilityRole="button"
                     accessibilityLabel={
-                      showEaten ? 'Show calories left' : 'Show calories eaten'
+                      showEaten
+                        ? `Show calories ${calorieBalance.label}`
+                        : 'Show calories eaten'
                     }
                   >
                     <View style={styles.calorieCopy}>
                       {showEaten ? (
                         <View style={styles.calorieValueRow}>
-                          <Text style={styles.calorieValue}>{caloriesEaten}</Text>
+                          <AnimatedNumber
+                            value={caloriesEaten}
+                            style={styles.calorieValue}
+                          />
                           <Text style={styles.calorieGoal}>
                             /{DAILY_GOALS.calories}
                           </Text>
                         </View>
                       ) : (
-                        <Text style={styles.calorieValue}>{caloriesLeft}</Text>
+                        <AnimatedNumber
+                          value={calorieBalance.amount}
+                          style={styles.calorieValue}
+                        />
                       )}
                       <View style={styles.calorieLabelRow}>
                         <Text style={styles.calorieLabel}>
-                          {showEaten ? 'Calories eaten' : 'Calories left'}
+                          {showEaten
+                            ? 'Calories eaten'
+                            : `Calories ${calorieBalance.label}`}
                         </Text>
                         <Ionicons
                           name="swap-vertical"
@@ -340,7 +407,7 @@ export default function HomeScreen() {
                     {MACRO_META.map((macro) => {
                       const eaten = Math.round(dayTotals[macro.key]);
                       const goal = DAILY_GOALS[macro.key];
-                      const left = Math.max(0, goal - eaten);
+                      const balance = goalBalance(eaten, goal);
                       return (
                         <Pressable
                           key={macro.key}
@@ -349,20 +416,28 @@ export default function HomeScreen() {
                           accessibilityRole="button"
                           accessibilityLabel={
                             showEaten
-                              ? `Show ${macro.label} left`
+                              ? `Show ${macro.label} ${balance.label}`
                               : `Show ${macro.label} eaten`
                           }
                         >
                           {showEaten ? (
                             <View style={styles.macroValueRow}>
-                              <Text style={styles.macroValue}>{eaten}</Text>
+                              <AnimatedNumber
+                                value={eaten}
+                                style={styles.macroValue}
+                              />
                               <Text style={styles.macroGoal}>/{goal}g</Text>
                             </View>
                           ) : (
-                            <Text style={styles.macroValue}>{left}g</Text>
+                            <AnimatedNumber
+                              value={balance.amount}
+                              suffix="g"
+                              style={styles.macroValue}
+                            />
                           )}
                           <Text style={styles.macroLabel}>
-                            {macro.label} {showEaten ? 'eaten' : 'left'}
+                            {macro.label}{' '}
+                            {showEaten ? 'eaten' : balance.label}
                           </Text>
                           <ProgressRing
                             size={64}
@@ -373,7 +448,7 @@ export default function HomeScreen() {
                             style={styles.macroRing}
                           >
                             {macro.key === 'fat' ? (
-                              <AvocadoIcon size={22} />
+                              <AvocadoIcon size={18} color={macro.color} />
                             ) : (
                               <MaterialCommunityIcons
                                 name={macro.icon}
@@ -399,9 +474,13 @@ export default function HomeScreen() {
                 >
                   <View style={styles.macroRow}>
                     <View style={styles.wideMetricCard}>
-                      <Text style={styles.wideMetricValue}>
-                        {avgHealthScore > 0 ? avgHealthScore.toFixed(1) : '0'}
-                      </Text>
+                      <View style={styles.healthScoreValueOffset}>
+                        <AnimatedNumber
+                          value={avgHealthScore}
+                          decimals={1}
+                          style={styles.wideMetricValue}
+                        />
+                      </View>
                       <Text style={styles.wideMetricLabel}>Health score</Text>
                       <ProgressRing
                         size={64}
@@ -419,7 +498,11 @@ export default function HomeScreen() {
                       </ProgressRing>
                     </View>
                     <View style={styles.wideMetricCard}>
-                      <Text style={styles.wideMetricValue}>{waterIntake}ml</Text>
+                      <AnimatedNumber
+                        value={waterIntake}
+                        suffix="ml"
+                        style={styles.wideMetricValue}
+                      />
                       <Text style={styles.wideMetricLabel}>Water</Text>
                       <ProgressRing
                         size={64}
@@ -444,42 +527,46 @@ export default function HomeScreen() {
                       onPress={toggleIntakeMode}
                       accessibilityRole="button"
                       accessibilityLabel={
-                        showEaten ? 'Show fiber left' : 'Show fiber eaten'
+                        showEaten
+                          ? `Show fiber ${goalBalance(dayTotals.fiber, DAILY_GOALS.fiber).label}`
+                          : 'Show fiber eaten'
                       }
                     >
                       {showEaten ? (
                         <View style={styles.macroValueRow}>
-                          <Text style={styles.macroValue}>
-                            {Math.round(dayTotals.fiber)}
-                          </Text>
+                          <AnimatedNumber
+                            value={Math.round(dayTotals.fiber)}
+                            style={styles.macroValue}
+                          />
                           <Text style={styles.macroGoal}>
                             /{DAILY_GOALS.fiber}g
                           </Text>
                         </View>
                       ) : (
-                        <Text style={styles.macroValue}>
-                          {Math.max(
-                            0,
-                            Math.round(DAILY_GOALS.fiber - dayTotals.fiber),
-                          )}
-                          g
-                        </Text>
+                        <AnimatedNumber
+                          value={goalBalance(dayTotals.fiber, DAILY_GOALS.fiber).amount}
+                          suffix="g"
+                          style={styles.macroValue}
+                        />
                       )}
                       <Text style={styles.macroLabel}>
-                        Fiber {showEaten ? 'eaten' : 'left'}
+                        Fiber{' '}
+                        {showEaten
+                          ? 'eaten'
+                          : goalBalance(dayTotals.fiber, DAILY_GOALS.fiber).label}
                       </Text>
                       <ProgressRing
                         size={64}
                         strokeWidth={7}
                         progress={dayTotals.fiber / DAILY_GOALS.fiber}
-                        color="#81C784"
+                        color="#64B5F6"
                         trackColor={colors.surfaceElevated}
                         style={styles.macroRing}
                       >
                         <MaterialCommunityIcons
-                          name="leaf"
+                          name="food-apple"
                           size={18}
-                          color="#81C784"
+                          color="#64B5F6"
                         />
                       </ProgressRing>
                     </Pressable>
@@ -488,21 +575,31 @@ export default function HomeScreen() {
                       onPress={toggleIntakeMode}
                       accessibilityRole="button"
                       accessibilityLabel={
-                        showEaten ? 'Show sugar left' : 'Show sugar eaten'
+                        showEaten
+                          ? `Show sugar ${goalBalance(sugarIntake, DAILY_GOALS.sugar).label}`
+                          : 'Show sugar eaten'
                       }
                     >
                       {showEaten ? (
                         <View style={styles.macroValueRow}>
-                          <Text style={styles.macroValue}>{sugarIntake}</Text>
+                          <AnimatedNumber
+                            value={sugarIntake}
+                            style={styles.macroValue}
+                          />
                           <Text style={styles.macroGoal}>/{DAILY_GOALS.sugar}g</Text>
                         </View>
                       ) : (
-                        <Text style={styles.macroValue}>
-                          {Math.max(0, DAILY_GOALS.sugar - sugarIntake)}g
-                        </Text>
+                        <AnimatedNumber
+                          value={goalBalance(sugarIntake, DAILY_GOALS.sugar).amount}
+                          suffix="g"
+                          style={styles.macroValue}
+                        />
                       )}
                       <Text style={styles.macroLabel}>
-                        Sugar {showEaten ? 'eaten' : 'left'}
+                        Sugar{' '}
+                        {showEaten
+                          ? 'eaten'
+                          : goalBalance(sugarIntake, DAILY_GOALS.sugar).label}
                       </Text>
                       <ProgressRing
                         size={64}
@@ -524,23 +621,33 @@ export default function HomeScreen() {
                       onPress={toggleIntakeMode}
                       accessibilityRole="button"
                       accessibilityLabel={
-                        showEaten ? 'Show sodium left' : 'Show sodium eaten'
+                        showEaten
+                          ? `Show sodium ${goalBalance(sodiumIntake, DAILY_GOALS.sodium).label}`
+                          : 'Show sodium eaten'
                       }
                     >
                       {showEaten ? (
                         <View style={styles.macroValueRow}>
-                          <Text style={styles.macroValue}>{sodiumIntake}</Text>
+                          <AnimatedNumber
+                            value={sodiumIntake}
+                            style={styles.macroValue}
+                          />
                           <Text style={styles.macroGoal}>
                             /{DAILY_GOALS.sodium}mg
                           </Text>
                         </View>
                       ) : (
-                        <Text style={styles.macroValue}>
-                          {Math.max(0, DAILY_GOALS.sodium - sodiumIntake)}mg
-                        </Text>
+                        <AnimatedNumber
+                          value={goalBalance(sodiumIntake, DAILY_GOALS.sodium).amount}
+                          suffix="mg"
+                          style={styles.macroValue}
+                        />
                       )}
                       <Text style={styles.macroLabel}>
-                        Sodium {showEaten ? 'eaten' : 'left'}
+                        Sodium{' '}
+                        {showEaten
+                          ? 'eaten'
+                          : goalBalance(sodiumIntake, DAILY_GOALS.sodium).label}
                       </Text>
                       <ProgressRing
                         size={64}
@@ -567,9 +674,9 @@ export default function HomeScreen() {
             </View>
           </View>
 
-          <Text style={styles.sectionTitle}>Recent meals</Text>
+          <Text style={styles.sectionTitle}>Recently uploaded</Text>
 
-          {dayMeals.length === 0 ? (
+          {!hasRecentSection ? (
             <View style={styles.emptyCard}>
               <View style={styles.emptyIllustration}>
                 <Ionicons name="restaurant-outline" size={36} color={colors.textMuted} />
@@ -579,25 +686,87 @@ export default function HomeScreen() {
                 </View>
               </View>
               <Text style={styles.emptyBody}>
-                Tap + to add your first meal of the day.
+                Tap + to add your first meal.
               </Text>
             </View>
           ) : (
-            dayMeals.map((item) => (
-              <View key={item.id} style={styles.mealItem}>
-                <View style={styles.mealText}>
-                  <Text style={styles.mealTitle} numberOfLines={1}>
-                    {item.foodName}
-                  </Text>
-                  <Text style={styles.mealMeta} numberOfLines={1}>
-                    {item.calories} kcal · Score {item.healthScore}/10
-                  </Text>
-                </View>
-              </View>
-            ))
+            <>
+              {recentJobCards.map((job) => (
+                <MealProcessingCard key={job.id} job={job} />
+              ))}
+              {recentMeals.map((item) => {
+              const timeLabel = formatMealTime(item.createdAt);
+              return (
+                <Pressable
+                  key={item.id}
+                  style={styles.mealCard}
+                  onPress={() => router.push(`/meal/${item.id}` as Href)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open nutrition for ${item.foodName}`}
+                >
+                  {item.imageUrl ? (
+                    <Image
+                      source={{ uri: item.imageUrl }}
+                      style={styles.mealThumb}
+                    />
+                  ) : (
+                    <View style={[styles.mealThumb, styles.mealThumbFallback]}>
+                      <Ionicons
+                        name="restaurant-outline"
+                        size={28}
+                        color={colors.textMuted}
+                      />
+                    </View>
+                  )}
+                  <View style={styles.mealBody}>
+                    <View style={styles.mealTitleRow}>
+                      <Text style={styles.mealTitle} numberOfLines={1}>
+                        {item.foodName}
+                      </Text>
+                      {timeLabel ? (
+                        <Text style={styles.mealTime}>{timeLabel}</Text>
+                      ) : null}
+                    </View>
+                    <View style={styles.mealCalorieRow}>
+                      <Ionicons name="flame" size={18} color={colors.text} />
+                      <Text style={styles.mealCalories}>
+                        {Math.round(item.calories)} calories
+                      </Text>
+                    </View>
+                    <View style={styles.mealMacroRow}>
+                      <View style={styles.mealMacro}>
+                        <MaterialCommunityIcons
+                          name="food-drumstick"
+                          size={16}
+                          color="#E57373"
+                        />
+                        <Text style={styles.mealMacroText}>
+                          {Math.round(item.macros.protein)}g
+                        </Text>
+                      </View>
+                      <View style={styles.mealMacro}>
+                        <MaterialCommunityIcons
+                          name="barley"
+                          size={16}
+                          color="#FFA726"
+                        />
+                        <Text style={styles.mealMacroText}>
+                          {Math.round(item.macros.carbs)}g
+                        </Text>
+                      </View>
+                      <View style={styles.mealMacro}>
+                        <AvocadoIcon size={16} color="#66BB6A" />
+                        <Text style={styles.mealMacroText}>
+                          {Math.round(item.macros.fat)}g
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                </Pressable>
+              );
+            })}
+            </>
           )}
-        </>
-      )}
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </ScrollView>
@@ -630,7 +799,7 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '500',
     letterSpacing: -0.5,
-    marginLeft: -2,
+    marginLeft: 0,
   },
   weekRow: {
     flexDirection: 'row',
@@ -654,6 +823,10 @@ const styles = StyleSheet.create({
   dayCircleSelected: {
     backgroundColor: colors.text,
   },
+  dayCircleToday: {
+    borderWidth: 2,
+    borderColor: colors.text,
+  },
   dayNumber: {
     color: colors.textMuted,
     fontSize: 14,
@@ -670,9 +843,6 @@ const styles = StyleSheet.create({
   dayWeekdaySelected: {
     color: colors.text,
     fontWeight: '600',
-  },
-  loader: {
-    marginTop: 24,
   },
   calorieCard: {
     backgroundColor: colors.card,
@@ -748,6 +918,10 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 20,
     fontWeight: '600',
+    lineHeight: 24,
+  },
+  healthScoreValueOffset: {
+    transform: [{ translateX: -2 }],
   },
   wideMetricLabel: {
     color: colors.textMuted,
@@ -807,10 +981,11 @@ const styles = StyleSheet.create({
     height: 7,
     borderRadius: 3.5,
     borderWidth: 1.5,
-    borderColor: colors.text,
+    borderColor: colors.border,
     backgroundColor: 'transparent',
   },
   pagerDotActive: {
+    borderColor: colors.text,
     backgroundColor: colors.text,
   },
   sectionTitle: {
@@ -851,23 +1026,71 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
   },
-  mealItem: {
+  mealCard: {
     backgroundColor: colors.card,
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 10,
+    borderRadius: 18,
+    marginBottom: 12,
+    flexDirection: 'row',
+    overflow: 'hidden',
+    height: 120,
   },
-  mealText: {
-    gap: 4,
+  mealThumb: {
+    width: 108,
+    height: 120,
+    backgroundColor: colors.surfaceElevated,
+  },
+  mealThumbFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mealBody: {
+    flex: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    justifyContent: 'center',
+    gap: 8,
+  },
+  mealTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   mealTitle: {
+    flex: 1,
     color: colors.text,
-    fontSize: 15,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: '500',
   },
-  mealMeta: {
+  mealTime: {
     color: colors.textMuted,
     fontSize: 13,
+    fontWeight: '500',
+  },
+  mealCalorieRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  mealCalories: {
+    color: colors.text,
+    fontSize: 17,
+    fontWeight: '600',
+    marginLeft: -2,
+  },
+  mealMacroRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  mealMacro: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  mealMacroText: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '400',
   },
   error: {
     color: '#FF6B6B',

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -35,6 +36,7 @@ import {
 
 const MODE_OPTIONS = ['Meal plan', 'Recipe'] as const;
 const SERVING_LABELS = SERVING_OPTIONS.map(String);
+const CHAT_GUTTER = 16;
 
 type TextMessage = {
   id: string;
@@ -110,8 +112,101 @@ function markPromptAnswered(messages: ChatMessage[]): ChatMessage[] {
 
 function openingMessages(): ChatMessage[] {
   return [
-    assistantText('Hi — what do you want to create?', MODE_OPTIONS),
+    assistantText('Hi, what do you want to create?', MODE_OPTIONS),
   ];
+}
+
+function StreamingText({
+  text,
+  onDone,
+}: {
+  text: string;
+  onDone?: () => void;
+}) {
+  const [shown, setShown] = useState('');
+  const doneRef = useRef(false);
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
+
+  useEffect(() => {
+    doneRef.current = false;
+    setShown('');
+    if (!text) {
+      onDoneRef.current?.();
+      return;
+    }
+
+    let index = 0;
+    const timer = setInterval(() => {
+      index += 1;
+      setShown(text.slice(0, index));
+      if (index >= text.length) {
+        clearInterval(timer);
+        if (!doneRef.current) {
+          doneRef.current = true;
+          onDoneRef.current?.();
+        }
+      }
+    }, 18);
+
+    return () => clearInterval(timer);
+  }, [text]);
+
+  return <Text style={styles.bubbleText}>{shown}</Text>;
+}
+
+function OptionsCarousel({
+  options,
+  onSelect,
+}: {
+  options: readonly string[];
+  onSelect: (option: string) => void;
+}) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(8)).current;
+
+  useEffect(() => {
+    opacity.setValue(0);
+    translateY.setValue(8);
+    Animated.parallel([
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 320,
+        useNativeDriver: true,
+      }),
+      Animated.timing(translateY, {
+        toValue: 0,
+        duration: 320,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [opacity, translateY, options]);
+
+  return (
+    <Animated.View
+      style={[
+        styles.optionsCarouselWrap,
+        { opacity, transform: [{ translateY }] },
+      ]}
+    >
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.optionsCarousel}
+        contentContainerStyle={styles.optionsRow}
+      >
+        {options.map((option) => (
+          <Pressable
+            key={option}
+            style={styles.optionChip}
+            onPress={() => onSelect(option)}
+          >
+            <Text style={styles.optionChipText}>{option}</Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+    </Animated.View>
+  );
 }
 
 export default function ChatScreen() {
@@ -136,6 +231,15 @@ export default function ChatScreen() {
   const [generating, setGenerating] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [streamReadyIds, setStreamReadyIds] = useState<Record<string, true>>(
+    {},
+  );
+
+  const markStreamReady = useRef((id: string) => {
+    setStreamReadyIds((current) =>
+      current[id] ? current : { ...current, [id]: true },
+    );
+  }).current;
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -359,6 +463,7 @@ export default function ChatScreen() {
     setGenerating(false);
     setExporting(false);
     setError(null);
+    setStreamReadyIds({});
   }
 
   async function onExportPdf() {
@@ -443,8 +548,10 @@ export default function ChatScreen() {
           }
 
           const isUser = message.role === 'user';
+          const streamDone = isUser || !!streamReadyIds[message.id];
           const showOptions =
             !isUser &&
+            streamDone &&
             !!message.options &&
             !message.answered &&
             isGeminiConfigured &&
@@ -459,31 +566,26 @@ export default function ChatScreen() {
                     isUser ? styles.userBubble : styles.assistantBubble,
                   ]}
                 >
-                  <Text
-                    style={[styles.bubbleText, isUser && styles.userBubbleText]}
-                  >
-                    {message.text}
-                  </Text>
+                  {isUser ? (
+                    <Text style={[styles.bubbleText, styles.userBubbleText]}>
+                      {message.text}
+                    </Text>
+                  ) : streamDone ? (
+                    <Text style={styles.bubbleText}>{message.text}</Text>
+                  ) : (
+                    <StreamingText
+                      text={message.text}
+                      onDone={() => markStreamReady(message.id)}
+                    />
+                  )}
                 </View>
               </View>
 
               {showOptions ? (
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  style={styles.optionsCarousel}
-                  contentContainerStyle={styles.optionsRow}
-                >
-                  {message.options!.map((option) => (
-                    <Pressable
-                      key={option}
-                      style={styles.optionChip}
-                      onPress={() => onSelectOption(option)}
-                    >
-                      <Text style={styles.optionChipText}>{option}</Text>
-                    </Pressable>
-                  ))}
-                </ScrollView>
+                <OptionsCarousel
+                  options={message.options!}
+                  onSelect={onSelectOption}
+                />
               ) : null}
             </View>
           );
@@ -551,7 +653,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   chatContent: {
-    paddingHorizontal: 16,
+    paddingHorizontal: CHAT_GUTTER,
     paddingTop: 4,
     paddingBottom: 24,
     gap: 14,
@@ -573,8 +675,10 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   assistantBubble: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: 6,
+    backgroundColor: 'transparent',
+    paddingHorizontal: 2,
+    paddingVertical: 2,
+    maxWidth: '92%',
   },
   userBubble: {
     backgroundColor: colors.buttonPrimaryBg,
@@ -596,17 +700,19 @@ const styles = StyleSheet.create({
   assistantBlock: {
     alignSelf: 'stretch',
   },
+  optionsCarouselWrap: {
+    marginHorizontal: -CHAT_GUTTER,
+  },
   optionsCarousel: {
-    marginLeft: 0,
     flexGrow: 0,
   },
   optionsRow: {
     gap: 8,
-    paddingRight: 8,
+    paddingHorizontal: CHAT_GUTTER,
   },
   optionChip: {
-    backgroundColor: '#3A3A3A',
-    borderColor: '#555555',
+    backgroundColor: colors.card,
+    borderColor: colors.border,
     borderWidth: 1,
     borderRadius: 999,
     paddingHorizontal: 14,

@@ -94,3 +94,18 @@ service cloud.firestore {
   }
 }
 ```
+
+## Storage rules (meal photos)
+
+Enable Storage in the Firebase console, then:
+
+```
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /users/{userId}/meals/{fileName} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}
+```

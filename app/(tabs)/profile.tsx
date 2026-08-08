@@ -9,7 +9,6 @@ import {
   View,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/context/AuthContext';
@@ -29,15 +28,11 @@ export default function ProfileScreen() {
   const { user, loading, signOut } = useAuth();
   const insets = useSafeAreaInsets();
   const [signingOut, setSigningOut] = useState(false);
-  const [loadingHistory, setLoadingHistory] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [hydrated, setHydrated] = useState(false);
   const [recipes, setRecipes] = useState<SavedRecipe[]>([]);
   const [analyses, setAnalyses] = useState<SavedNutrition[]>([]);
   const [historyError, setHistoryError] = useState<string | null>(null);
 
   const refreshFromNetwork = useCallback(async (uid: string) => {
-    setRefreshing(true);
     setHistoryError(null);
     try {
       const [nextRecipes, nextAnalyses] = await Promise.all([
@@ -52,9 +47,6 @@ export default function ProfileScreen() {
           ? err.message
           : 'Could not load saved history from Firestore.',
       );
-    } finally {
-      setRefreshing(false);
-      setLoadingHistory(false);
     }
   }, []);
 
@@ -62,60 +54,33 @@ export default function ProfileScreen() {
     useCallback(() => {
       if (!user) return;
       const uid = user.uid;
-
       let active = true;
 
-      // Re-read local cache on focus so new saves appear without a network trip.
-      const syncCache = getHistoryCacheSync(uid);
-      if (syncCache) {
-        setRecipes(syncCache.recipes);
-        setAnalyses(syncCache.analyses);
-        setLoadingHistory(false);
-        setHydrated(true);
-        return () => {
-          active = false;
-        };
-      }
-
-      if (hydrated) {
-        return () => {
-          active = false;
-        };
-      }
-
-      async function hydrate() {
-        setLoadingHistory(true);
-        const disk = await loadHistoryCache(uid);
-        if (!active) return;
-
-        if (disk) {
-          setRecipes(disk.recipes);
-          setAnalyses(disk.analyses);
-          setLoadingHistory(false);
-          setHydrated(true);
-          return;
+      async function load() {
+        const syncCache = getHistoryCacheSync(uid);
+        if (syncCache) {
+          setRecipes(syncCache.recipes);
+          setAnalyses(syncCache.analyses);
+        } else {
+          const disk = await loadHistoryCache(uid);
+          if (!active) return;
+          setRecipes(disk?.recipes ?? []);
+          setAnalyses(disk?.analyses ?? []);
         }
 
-        // First visit with nothing cached — fetch once.
-        await refreshFromNetwork(uid);
-        if (active) setHydrated(true);
+        void refreshFromNetwork(uid);
       }
 
-      void hydrate();
+      void load();
 
       return () => {
         active = false;
       };
-    }, [user, hydrated, refreshFromNetwork]),
+    }, [user, refreshFromNetwork]),
   );
 
   if (!loading && !user) {
     return <Redirect href="/(auth)/login" />;
-  }
-
-  async function onRefresh() {
-    if (!user || refreshing) return;
-    await refreshFromNetwork(user.uid);
   }
 
   async function onSignOut() {
@@ -132,33 +97,16 @@ export default function ProfileScreen() {
       style={styles.flex}
       contentContainerStyle={[styles.content, { paddingTop: insets.top + 24 }]}
     >
-      <View style={styles.titleRow}>
-        <View style={styles.titleBlock}>
-          <Text style={styles.title}>Profile</Text>
-          <Text style={styles.description}>
-            {user?.displayName || user?.email || 'Signed in to Savor IQ'}
-          </Text>
-        </View>
-        <Pressable
-          style={[styles.refreshButton, refreshing && styles.buttonDisabled]}
-          onPress={onRefresh}
-          disabled={!user || refreshing || loadingHistory}
-          accessibilityRole="button"
-          accessibilityLabel="Refresh history"
-        >
-          {refreshing ? (
-            <ActivityIndicator color={colors.text} />
-          ) : (
-            <Ionicons name="refresh" size={20} color={colors.text} />
-          )}
-        </Pressable>
+      <View style={styles.titleBlock}>
+        <Text style={styles.title}>Profile</Text>
+        <Text style={styles.description}>
+          {user?.displayName || user?.email || 'Signed in to Savor IQ'}
+        </Text>
       </View>
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Saved recipes</Text>
-        {loadingHistory ? (
-          <ActivityIndicator color={colors.text} style={styles.loader} />
-        ) : recipes.length === 0 ? (
+        {recipes.length === 0 ? (
           <Text style={styles.empty}>No cloud-saved recipes yet.</Text>
         ) : (
           recipes.map((recipe) => (
@@ -176,9 +124,7 @@ export default function ProfileScreen() {
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Nutrition history</Text>
-        {loadingHistory ? (
-          <ActivityIndicator color={colors.text} style={styles.loader} />
-        ) : analyses.length === 0 ? (
+        {analyses.length === 0 ? (
           <Text style={styles.empty}>No saved meal analyses yet.</Text>
         ) : (
           analyses.map((item) => (
@@ -228,15 +174,8 @@ const styles = StyleSheet.create({
     paddingTop: 24,
     paddingBottom: 40,
   },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 12,
-    marginBottom: 24,
-  },
   titleBlock: {
-    flex: 1,
+    marginBottom: 24,
   },
   title: {
     color: colors.text,
@@ -249,15 +188,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 22,
   },
-  refreshButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.surfaceElevated,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 2,
-  },
   section: {
     marginBottom: 24,
   },
@@ -266,9 +196,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     marginBottom: 12,
-  },
-  loader: {
-    marginVertical: 8,
   },
   empty: {
     color: colors.textMuted,
@@ -324,8 +251,5 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 16,
     fontWeight: '600',
-  },
-  buttonDisabled: {
-    opacity: 0.5,
   },
 });

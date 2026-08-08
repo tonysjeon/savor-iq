@@ -24,12 +24,14 @@ export default function RootLayout() {
           name="analyze"
           options={{
             headerShown: false,
-            presentation: 'fullScreenModal',
-            animation: 'slide_from_bottom',
-            contentStyle: { backgroundColor: '#000000' },
+            presentation: 'transparentModal',
+            animation: 'none',
+            gestureEnabled: false,
+            contentStyle: { backgroundColor: 'transparent' },
           }}
         />
         <Stack.Screen name="about" options={{ headerShown: false }} />
+        <Stack.Screen name="meal/[id]" options={{ headerShown: false }} />
       </Stack>
     </AuthProvider>
   );

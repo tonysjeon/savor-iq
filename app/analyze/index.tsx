@@ -1,31 +1,50 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { MealCamera, type CapturedMealPhoto } from '@/components/MealCamera';
+import { useAuth } from '@/context/AuthContext';
 import { colors } from '@/constants/theme';
-import { startAnalyzeSession } from '@/lib/analyzeSession';
 import { isGeminiConfigured } from '@/lib/gemini';
+import { useLeaveAnalyze } from '@/lib/leaveAnalyze';
+import { enqueueMealAnalysis } from '@/lib/mealAnalysisQueue';
 
 export default function AnalyzeScreen() {
+  const { user } = useAuth();
   const [leaving, setLeaving] = useState(false);
+  const [navigatingHome, setNavigatingHome] = useState(false);
+  const leaveAnalyze = useLeaveAnalyze();
 
-  function handleClose() {
-    // Drop CameraView before the dismiss animation so it doesn't flash corners.
+  function dismissCamera() {
+    // Keep CameraView mounted so the live preview remains visible throughout
+    // the downward dismissal animation.
     setLeaving(true);
     requestAnimationFrame(() => {
-      if (router.canGoBack()) {
-        router.back();
-      } else {
-        router.replace('/(tabs)');
-      }
+      leaveAnalyze();
     });
   }
 
+  function handleClose() {
+    dismissCamera();
+  }
+
   function handleCapture(photo: CapturedMealPhoto, source: 'camera' | 'gallery') {
-    if (!isGeminiConfigured) return;
-    startAnalyzeSession(photo, source);
-    router.push('/analyze/confirm');
+    if (!isGeminiConfigured || leaving || navigatingHome) return;
+    enqueueMealAnalysis({
+      photo,
+      source,
+      userId: user?.uid ?? null,
+    });
+    // Keep the restored live preview visible until navigation occurs. The black
+    // cover used when manually closing the camera is intentionally skipped here.
+    setNavigatingHome(true);
+    // Analyze is opened on top of Home. Reveal the existing Home screen instead
+    // of replacing this route, which can animate Home in as a new screen.
+    if (router.canDismiss()) {
+      router.dismiss();
+    } else {
+      router.replace('/(tabs)');
+    }
   }
 
   if (!isGeminiConfigured) {
@@ -42,18 +61,16 @@ export default function AnalyzeScreen() {
     );
   }
 
-  if (leaving) {
-    return <View style={styles.cover} />;
-  }
-
-  return <MealCamera onClose={handleClose} onCapture={handleCapture} />;
+  return (
+    <MealCamera
+      onClose={handleClose}
+      onCapture={handleCapture}
+      disabled={leaving || navigatingHome}
+    />
+  );
 }
 
 const styles = StyleSheet.create({
-  cover: {
-    flex: 1,
-    backgroundColor: '#000000',
-  },
   noticeScreen: {
     flex: 1,
     backgroundColor: colors.background,
