@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { router } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { MealCamera, type CapturedMealPhoto } from '@/components/MealCamera';
@@ -11,10 +12,12 @@ import { enqueueMealAnalysis } from '@/lib/mealAnalysisQueue';
 export default function AnalyzeScreen() {
   const { user } = useAuth();
   const [leaving, setLeaving] = useState(false);
+  const [navigatingHome, setNavigatingHome] = useState(false);
   const leaveAnalyze = useLeaveAnalyze();
 
   function dismissCamera() {
-    // Drop CameraView before dismiss so it doesn't flash corners.
+    // Keep CameraView mounted so the live preview remains visible throughout
+    // the downward dismissal animation.
     setLeaving(true);
     requestAnimationFrame(() => {
       leaveAnalyze();
@@ -26,13 +29,22 @@ export default function AnalyzeScreen() {
   }
 
   function handleCapture(photo: CapturedMealPhoto, source: 'camera' | 'gallery') {
-    if (!isGeminiConfigured || leaving) return;
+    if (!isGeminiConfigured || leaving || navigatingHome) return;
     enqueueMealAnalysis({
       photo,
       source,
       userId: user?.uid ?? null,
     });
-    dismissCamera();
+    // Keep the restored live preview visible until navigation occurs. The black
+    // cover used when manually closing the camera is intentionally skipped here.
+    setNavigatingHome(true);
+    // Analyze is opened on top of Home. Reveal the existing Home screen instead
+    // of replacing this route, which can animate Home in as a new screen.
+    if (router.canDismiss()) {
+      router.dismiss();
+    } else {
+      router.replace('/(tabs)');
+    }
   }
 
   if (!isGeminiConfigured) {
@@ -49,24 +61,16 @@ export default function AnalyzeScreen() {
     );
   }
 
-  if (leaving) {
-    return <View style={styles.cover} />;
-  }
-
   return (
     <MealCamera
       onClose={handleClose}
       onCapture={handleCapture}
-      disabled={leaving}
+      disabled={leaving || navigatingHome}
     />
   );
 }
 
 const styles = StyleSheet.create({
-  cover: {
-    flex: 1,
-    backgroundColor: '#000000',
-  },
   noticeScreen: {
     flex: 1,
     backgroundColor: colors.background,

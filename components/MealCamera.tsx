@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   Platform,
   Pressable,
   StyleSheet,
@@ -20,6 +21,10 @@ const CORNER = 48;
 const CORNER_RADIUS = 20;
 const STROKE = 3.5;
 const FRAME_STROKE = 'rgba(255,255,255,0.95)';
+const FRAME_LEFT = 0.08;
+const FRAME_TOP = 0.18;
+const FRAME_RIGHT = 0.08;
+const FRAME_BOTTOM = 0.28;
 
 export type CapturedMealPhoto = {
   uri: string;
@@ -83,27 +88,66 @@ export function MealCamera({ onClose, onCapture, disabled = false }: MealCameraP
   const [torch, setTorch] = useState(false);
   const [ready, setReady] = useState(false);
   const [capturing, setCapturing] = useState(false);
+  const shutterScale = useRef(new Animated.Value(1)).current;
+  const captureFlashOpacity = useRef(new Animated.Value(0)).current;
   const [pickingGallery, setPickingGallery] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  function setShutterPressed(pressed: boolean) {
+    Animated.timing(shutterScale, {
+      toValue: pressed ? 0.985 : 1,
+      duration: pressed ? 45 : 65,
+      useNativeDriver: true,
+    }).start();
+  }
+
+  function beginCaptureClick() {
+    Animated.sequence([
+      Animated.timing(captureFlashOpacity, {
+        toValue: 0.2,
+        duration: 15,
+        useNativeDriver: true,
+      }),
+      Animated.timing(captureFlashOpacity, {
+        // Keep a subtle shade present until native capture finishes so there is
+        // no idle-looking gap between the click feedback and dismissal.
+        toValue: 0.1,
+        duration: 45,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }
+
+  function clearCaptureClick() {
+    Animated.timing(captureFlashOpacity, {
+      toValue: 0,
+      duration: 25,
+      useNativeDriver: true,
+    }).start();
+  }
 
   async function takePhoto() {
     if (!cameraRef.current || !ready || capturing || disabled) return;
 
     setCapturing(true);
     setError(null);
+    beginCaptureClick();
 
     try {
       const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.45,
+        quality: 0.8,
         base64: true,
         exif: false,
         shutterSound: Platform.OS === 'ios',
       });
 
       if (!photo?.uri || !photo.base64) {
+        clearCaptureClick();
         setError('Could not capture photo. Try again.');
         return;
       }
+
+      setCapturing(false);
 
       onCapture(
         {
@@ -114,6 +158,7 @@ export function MealCamera({ onClose, onCapture, disabled = false }: MealCameraP
         'camera',
       );
     } catch (err) {
+      clearCaptureClick();
       setError(err instanceof Error ? err.message : 'Camera capture failed.');
     } finally {
       setCapturing(false);
@@ -138,7 +183,7 @@ export function MealCamera({ onClose, onCapture, disabled = false }: MealCameraP
 
       const picked = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
-        quality: 0.45,
+        quality: 0.8,
         base64: true,
         allowsEditing: true,
         aspect: [4, 3],
@@ -211,6 +256,11 @@ export function MealCamera({ onClose, onCapture, disabled = false }: MealCameraP
             onCameraReady={() => setReady(true)}
           />
 
+          <Animated.View
+            pointerEvents="none"
+            style={[styles.captureFlash, { opacity: captureFlashOpacity }]}
+          />
+
           <View style={styles.grabberWrap} pointerEvents="none">
             <View style={styles.grabber} />
           </View>
@@ -241,7 +291,7 @@ export function MealCamera({ onClose, onCapture, disabled = false }: MealCameraP
             {error ? <Text style={styles.error}>{error}</Text> : null}
             <View style={styles.controlsRow}>
               <Pressable
-                style={[styles.circleButton, busy && styles.controlDisabled]}
+                style={styles.circleButton}
                 disabled={busy}
                 onPress={openGallery}
                 accessibilityLabel="Open gallery"
@@ -250,20 +300,23 @@ export function MealCamera({ onClose, onCapture, disabled = false }: MealCameraP
               </Pressable>
 
               <Pressable
-                style={[styles.shutter, (!ready || busy) && styles.controlDisabled]}
+                style={[styles.shutter, !ready && styles.controlDisabled]}
                 disabled={!ready || busy}
                 onPress={takePhoto}
+                onPressIn={() => setShutterPressed(true)}
+                onPressOut={() => setShutterPressed(false)}
                 accessibilityLabel="Take photo"
               >
-                {capturing ? (
-                  <ActivityIndicator color="#111111" />
-                ) : (
-                  <View style={styles.shutterInner} />
-                )}
+                <Animated.View
+                  style={[
+                    styles.shutterInner,
+                    { transform: [{ scale: shutterScale }] },
+                  ]}
+                />
               </Pressable>
 
               <Pressable
-                style={[styles.circleButton, busy && styles.controlDisabled]}
+                style={styles.circleButton}
                 disabled={busy}
                 onPress={() => setTorch((value) => !value)}
                 accessibilityLabel={torch ? 'Turn flash off' : 'Turn flash on'}
@@ -290,6 +343,11 @@ const styles = StyleSheet.create({
   },
   flex: {
     flex: 1,
+  },
+  captureFlash: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#000000',
+    zIndex: 1,
   },
   grabberWrap: {
     position: 'absolute',
@@ -348,10 +406,11 @@ const styles = StyleSheet.create({
   },
   frameGuide: {
     position: 'absolute',
-    left: '8%',
-    right: '8%',
-    top: '18%',
-    bottom: '28%',
+    zIndex: 2,
+    left: `${FRAME_LEFT * 100}%`,
+    right: `${FRAME_RIGHT * 100}%`,
+    top: `${FRAME_TOP * 100}%`,
+    bottom: `${FRAME_BOTTOM * 100}%`,
   },
   cornerTL: {
     position: 'absolute',
@@ -375,6 +434,7 @@ const styles = StyleSheet.create({
   },
   bottomBar: {
     position: 'absolute',
+    zIndex: 4,
     left: 0,
     right: 0,
     bottom: 0,

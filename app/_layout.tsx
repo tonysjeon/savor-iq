@@ -25,12 +25,13 @@ export default function RootLayout() {
           options={{
             headerShown: false,
             presentation: 'transparentModal',
-            animation: 'slide_from_bottom',
-            gestureEnabled: true,
+            animation: 'none',
+            gestureEnabled: false,
             contentStyle: { backgroundColor: 'transparent' },
           }}
         />
         <Stack.Screen name="about" options={{ headerShown: false }} />
+        <Stack.Screen name="meal/[id]" options={{ headerShown: false }} />
       </Stack>
     </AuthProvider>
   );
