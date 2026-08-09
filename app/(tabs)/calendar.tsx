@@ -1,15 +1,22 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { router, type Href } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { MealHistoryCard } from '@/components/MealHistoryCard';
+import { AvocadoIcon } from '@/components/AvocadoIcon';
+import { ProgressRing } from '@/components/ProgressRing';
 import { useAuth } from '@/context/AuthContext';
 import { colors } from '@/constants/theme';
 import {
@@ -26,10 +33,34 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 
 const MACRO_COLORS = {
   protein: '#E57373',
-  carbs: '#64B5F6',
-  fat: '#FFD54F',
-  fiber: '#81C784',
+  carbs: '#FFA726',
+  fat: '#66BB6A',
+  fiber: '#64B5F6',
+  sugar: '#F48FB1',
+  sodium: '#90A4AE',
 } as const;
+
+const DAILY_GOALS = {
+  calories: 2000,
+  protein: 150,
+  carbs: 250,
+  fat: 65,
+  fiber: 30,
+  sugar: 50,
+  sodium: 2300,
+} as const;
+
+const PAGE_ONE_MACROS = [
+  { key: 'protein' as const, label: 'Protein', icon: 'food-drumstick' as const },
+  { key: 'carbs' as const, label: 'Carbs', icon: 'barley' as const },
+  { key: 'fat' as const, label: 'Fat' },
+] as const;
+
+const PAGE_TWO_MACROS = [
+  { key: 'fiber' as const, label: 'Fiber', icon: 'food-apple' as const },
+  { key: 'sugar' as const, label: 'Sugar', icon: 'candy' as const },
+  { key: 'sodium' as const, label: 'Sodium', icon: 'shaker-outline' as const },
+] as const;
 
 function startOfDay(date: Date): number {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
@@ -76,21 +107,40 @@ function sumMeals(meals: SavedNutrition[]) {
       carbs: acc.carbs + item.macros.carbs,
       fat: acc.fat + item.macros.fat,
       fiber: acc.fiber + item.macros.fiber,
+      sugar: acc.sugar + item.macros.sugar,
+      sodium: acc.sodium + item.macros.sodium,
+      healthScore: acc.healthScore + item.healthScore,
+      count: acc.count + 1,
     }),
-    { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 },
+    {
+      calories: 0,
+      protein: 0,
+      carbs: 0,
+      fat: 0,
+      fiber: 0,
+      sugar: 0,
+      sodium: 0,
+      healthScore: 0,
+      count: 0,
+    },
   );
 }
 
 export default function CalendarScreen() {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
   const today = useMemo(() => new Date(), []);
   const [cursor, setCursor] = useState(
     () => new Date(today.getFullYear(), today.getMonth(), 1),
   );
   const [selected, setSelected] = useState<Date | null>(() => today);
-  const [analyses, setAnalyses] = useState<SavedNutrition[]>([]);
+  const [analyses, setAnalyses] = useState<SavedNutrition[]>(() =>
+    user ? (getHistoryCacheSync(user.uid)?.analyses ?? []) : [],
+  );
   const [error, setError] = useState<string | null>(null);
+  const [mealPage, setMealPage] = useState(0);
+  const [nutritionPage, setNutritionPage] = useState(0);
 
   const refreshFromNetwork = useCallback(async (uid: string) => {
     setError(null);
@@ -155,15 +205,15 @@ export default function CalendarScreen() {
   });
 
   const daysWithMeals = useMemo(() => {
-    const set = new Set<number>();
+    const days = new Set<number>();
     for (const item of analyses) {
       if (item.createdAt == null) continue;
       const d = new Date(item.createdAt);
       if (d.getFullYear() === year && d.getMonth() === month) {
-        set.add(startOfDay(d));
+        days.add(startOfDay(d));
       }
     }
-    return set;
+    return days;
   }, [analyses, year, month]);
 
   const selectedMeals = useMemo(
@@ -171,14 +221,9 @@ export default function CalendarScreen() {
     [analyses, selected],
   );
   const totals = useMemo(() => sumMeals(selectedMeals), [selectedMeals]);
-  const macroTotal =
-    totals.protein + totals.carbs + totals.fat + totals.fiber || 1;
-  const macros = [
-    { key: 'protein', label: 'Protein', value: totals.protein, color: MACRO_COLORS.protein },
-    { key: 'carbs', label: 'Carbs', value: totals.carbs, color: MACRO_COLORS.carbs },
-    { key: 'fat', label: 'Fat', value: totals.fat, color: MACRO_COLORS.fat },
-    { key: 'fiber', label: 'Fiber', value: totals.fiber, color: MACRO_COLORS.fiber },
-  ] as const;
+  const averageHealthScore = totals.count
+    ? totals.healthScore / totals.count
+    : 0;
 
   function shiftMonth(delta: number) {
     const next = new Date(cursor.getFullYear(), cursor.getMonth() + delta, 1);
@@ -186,7 +231,29 @@ export default function CalendarScreen() {
       next.getFullYear() === today.getFullYear() &&
       next.getMonth() === today.getMonth();
     setCursor(next);
-    setSelected(isCurrentMonth ? today : null);
+    setSelected(isCurrentMonth ? today : next);
+    setMealPage(0);
+    setNutritionPage(0);
+  }
+
+  function selectDay(day: Date) {
+    setSelected(day);
+    setMealPage(0);
+    setNutritionPage(0);
+  }
+
+  function onMealCarouselScroll(
+    event: NativeSyntheticEvent<NativeScrollEvent>,
+  ) {
+    const next = Math.round(event.nativeEvent.contentOffset.x / windowWidth);
+    setMealPage(Math.min(selectedMeals.length - 1, Math.max(0, next)));
+  }
+
+  function onNutritionPagerScroll(
+    event: NativeSyntheticEvent<NativeScrollEvent>,
+  ) {
+    const next = Math.round(event.nativeEvent.contentOffset.x / windowWidth);
+    setNutritionPage(Math.min(1, Math.max(0, next)));
   }
 
   const selectedLabel = selected
@@ -202,13 +269,14 @@ export default function CalendarScreen() {
       style={styles.flex}
       contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}
     >
+      <View style={styles.calendarCard}>
       <View style={styles.monthHeader}>
         <Pressable
           style={styles.monthNav}
           onPress={() => shiftMonth(-1)}
           accessibilityLabel="Previous month"
         >
-          <Ionicons name="chevron-back" size={20} color={colors.text} />
+          <Ionicons name="chevron-back" size={18} color={colors.text} />
         </Pressable>
         <Text style={styles.monthLabel}>{monthLabel}</Text>
         <Pressable
@@ -216,7 +284,7 @@ export default function CalendarScreen() {
           onPress={() => shiftMonth(1)}
           accessibilityLabel="Next month"
         >
-          <Ionicons name="chevron-forward" size={20} color={colors.text} />
+          <Ionicons name="chevron-forward" size={18} color={colors.text} />
         </Pressable>
       </View>
 
@@ -248,7 +316,7 @@ export default function CalendarScreen() {
                       isSelected && styles.daySelected,
                       isToday && !isSelected && styles.dayToday,
                     ]}
-                    onPress={() => setSelected(day)}
+                    onPress={() => selectDay(day)}
                   >
                     <Text
                       style={[
@@ -260,10 +328,7 @@ export default function CalendarScreen() {
                     </Text>
                     {hasMeals ? (
                       <View
-                        style={[
-                          styles.dot,
-                          isSelected && styles.dotSelected,
-                        ]}
+                        style={[styles.dot, isSelected && styles.dotSelected]}
                       />
                     ) : null}
                   </Pressable>
@@ -271,6 +336,7 @@ export default function CalendarScreen() {
               })}
             </View>
           ))}
+      </View>
       </View>
 
       {selected ? (
@@ -281,43 +347,199 @@ export default function CalendarScreen() {
             <Text style={styles.empty}>No meals logged this day.</Text>
           ) : (
             <>
-              <Text style={styles.calories}>{Math.round(totals.calories)} kcal</Text>
-              <View style={styles.macroStack}>
-                {macros.map((macro) => (
-                  <View key={macro.key} style={styles.macroRow}>
-                    <View style={styles.macroLabelRow}>
-                      <View style={[styles.macroDot, { backgroundColor: macro.color }]} />
-                      <Text style={styles.macroLabel}>{macro.label}</Text>
-                      <Text style={styles.macroValue}>
-                        {Math.round(macro.value)}g
-                      </Text>
+              <View style={styles.nutritionSection}>
+                <ScrollView
+                  key={`nutrition-${startOfDay(selected)}`}
+                  horizontal
+                  pagingEnabled
+                  showsHorizontalScrollIndicator={false}
+                  removeClippedSubviews={false}
+                  decelerationRate="fast"
+                  bounces={false}
+                  onScroll={onNutritionPagerScroll}
+                  scrollEventThrottle={16}
+                >
+                  <View style={[styles.nutritionPage, { width: windowWidth }]}>
+                    <View style={styles.calorieCard}>
+                      <View style={styles.calorieCopy}>
+                        <View style={styles.calorieValueRow}>
+                          <Text style={styles.calorieValue}>
+                            {Math.round(totals.calories)}
+                          </Text>
+                          <Text style={styles.calorieGoal}>
+                            /{DAILY_GOALS.calories}
+                          </Text>
+                        </View>
+                        <Text style={[styles.metricLabel, styles.calorieLabel]}>
+                          Calories eaten
+                        </Text>
+                      </View>
+                      <ProgressRing
+                        size={60}
+                        strokeWidth={7}
+                        progress={totals.calories / DAILY_GOALS.calories}
+                        color={colors.text}
+                        trackColor={colors.surfaceElevated}
+                      >
+                        <Ionicons name="flame" size={17} color={colors.text} />
+                      </ProgressRing>
                     </View>
-                    <View style={styles.barTrack}>
-                      <View
-                        style={[
-                          styles.barFill,
-                          {
-                            backgroundColor: macro.color,
-                            width: `${Math.min(100, (macro.value / macroTotal) * 100)}%`,
-                          },
-                        ]}
-                      />
+                    <View style={styles.metricGrid}>
+                      {PAGE_ONE_MACROS.map((macro) => (
+                        <View key={macro.key} style={styles.metricCard}>
+                          <View>
+                            <View style={styles.metricValueRow}>
+                              <Text style={styles.metricValue}>
+                                {Math.round(totals[macro.key])}
+                              </Text>
+                              <Text style={styles.metricGoal}>
+                                /{DAILY_GOALS[macro.key]}g
+                              </Text>
+                            </View>
+                            <Text style={[styles.metricLabel, styles.macroLabel]}>
+                              {macro.label} eaten
+                            </Text>
+                          </View>
+                          <ProgressRing
+                            size={44}
+                            strokeWidth={5}
+                            progress={totals[macro.key] / DAILY_GOALS[macro.key]}
+                            color={MACRO_COLORS[macro.key]}
+                            trackColor={colors.surfaceElevated}
+                          >
+                            {macro.key === 'fat' ? (
+                              <AvocadoIcon size={14} color={MACRO_COLORS.fat} />
+                            ) : (
+                              <MaterialCommunityIcons
+                                name={macro.icon}
+                                size={14}
+                                color={MACRO_COLORS[macro.key]}
+                              />
+                            )}
+                          </ProgressRing>
+                        </View>
+                      ))}
                     </View>
                   </View>
-                ))}
+                  <View style={[styles.nutritionPage, { width: windowWidth }]}>
+                    <View style={styles.healthCard}>
+                      <View style={styles.healthCopy}>
+                        <View style={styles.metricValueRow}>
+                          <Text style={styles.healthValue}>
+                            {averageHealthScore.toFixed(1)}
+                          </Text>
+                          <Text style={styles.healthGoal}>/10</Text>
+                        </View>
+                        <Text style={[styles.metricLabel, styles.healthLabel]}>
+                          Health score
+                        </Text>
+                      </View>
+                      <ProgressRing
+                        size={60}
+                        strokeWidth={7}
+                        progress={averageHealthScore / 10}
+                        color="#66BB6A"
+                        trackColor={colors.surfaceElevated}
+                      >
+                        <MaterialCommunityIcons
+                          name="heart-pulse"
+                          size={17}
+                          color="#66BB6A"
+                        />
+                      </ProgressRing>
+                    </View>
+                    <View style={styles.metricGrid}>
+                      {PAGE_TWO_MACROS.map((macro) => {
+                        const unit = macro.key === 'sodium' ? 'mg' : 'g';
+                        return (
+                          <View key={macro.key} style={styles.metricCard}>
+                        <View>
+                          <View style={styles.metricValueRow}>
+                            <Text style={styles.metricValue}>
+                              {Math.round(totals[macro.key])}
+                            </Text>
+                            <Text style={styles.metricGoal}>
+                              /{DAILY_GOALS[macro.key]}{unit}
+                            </Text>
+                          </View>
+                          <Text style={[styles.metricLabel, styles.macroLabel]}>
+                            {macro.label} eaten
+                          </Text>
+                        </View>
+                        <ProgressRing
+                          size={44}
+                          strokeWidth={5}
+                          progress={totals[macro.key] / DAILY_GOALS[macro.key]}
+                          color={MACRO_COLORS[macro.key]}
+                          trackColor={colors.surfaceElevated}
+                        >
+                          <MaterialCommunityIcons
+                            name={macro.icon}
+                            size={14}
+                            color={MACRO_COLORS[macro.key]}
+                          />
+                        </ProgressRing>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </View>
+                </ScrollView>
+                <View style={styles.pagerDots}>
+                  {[0, 1].map((page) => (
+                    <View
+                      key={page}
+                      style={[
+                        styles.pagerDot,
+                        nutritionPage === page && styles.pagerDotActive,
+                      ]}
+                    />
+                  ))}
+                </View>
               </View>
 
-              <Text style={styles.mealsHeading}>Meals</Text>
-              {selectedMeals.map((item) => (
-                <View key={item.id} style={styles.mealItem}>
-                  <Text style={styles.mealTitle} numberOfLines={1}>
-                    {item.foodName}
-                  </Text>
-                  <Text style={styles.mealMeta}>
-                    {item.calories} kcal · Score {item.healthScore}/10
-                  </Text>
-                </View>
-              ))}
+              <View style={styles.mealsHeadingRow}>
+                <Text style={styles.mealsHeading}>Meals</Text>
+              </View>
+              <View style={styles.mealPager}>
+                <ScrollView
+                  key={`meals-${startOfDay(selected)}`}
+                  horizontal
+                  pagingEnabled
+                  showsHorizontalScrollIndicator={false}
+                  removeClippedSubviews={false}
+                  decelerationRate="fast"
+                  bounces={false}
+                  onScroll={onMealCarouselScroll}
+                  scrollEventThrottle={16}
+                  accessibilityLabel="Meals for selected day"
+                >
+                  {selectedMeals.map((item) => (
+                    <View
+                      key={item.id}
+                      style={[styles.mealPage, { width: windowWidth }]}
+                    >
+                      <MealHistoryCard
+                        item={item}
+                        onPress={() => router.push(`/meal/${item.id}` as Href)}
+                      />
+                    </View>
+                  ))}
+                </ScrollView>
+                {selectedMeals.length > 1 ? (
+                  <View style={styles.pagerDots}>
+                    {selectedMeals.map((item, index) => (
+                      <View
+                        key={item.id}
+                        style={[
+                          styles.pagerDot,
+                          mealPage === index && styles.pagerDotActive,
+                        ]}
+                      />
+                    ))}
+                  </View>
+                ) : null}
+              </View>
             </>
           )}
         </View>
@@ -331,23 +553,31 @@ export default function CalendarScreen() {
 const styles = StyleSheet.create({
   flex: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: colors.page,
   },
   content: {
     paddingHorizontal: 20,
     paddingTop: 12,
     paddingBottom: 40,
+    backgroundColor: colors.page,
+  },
+  calendarCard: {
+    backgroundColor: colors.card,
+    borderRadius: 22,
+    padding: 16,
+    marginBottom: 24,
   },
   monthHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    paddingHorizontal: 7,
     marginBottom: 12,
   },
   monthNav: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: colors.surfaceElevated,
     alignItems: 'center',
     justifyContent: 'center',
@@ -370,7 +600,6 @@ const styles = StyleSheet.create({
   },
   grid: {
     gap: 4,
-    marginBottom: 24,
   },
   weekRow: {
     flexDirection: 'row',
@@ -413,12 +642,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.buttonPrimaryText,
   },
   detail: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: 16,
-    padding: 16,
-    gap: 10,
+    gap: 12,
   },
   detailTitle: {
     color: colors.text,
@@ -430,68 +654,165 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
   },
-  calories: {
-    color: colors.text,
-    fontSize: 28,
-    fontWeight: '700',
+  nutritionSection: {
+    backgroundColor: colors.page,
+    borderRadius: 22,
+    marginHorizontal: -20,
   },
-  macroStack: {
+  nutritionPage: {
     gap: 10,
-    marginTop: 4,
+    paddingHorizontal: 20,
   },
-  macroRow: {
-    gap: 6,
-  },
-  macroLabelRow: {
+  calorieCard: {
+    height: 120,
+    backgroundColor: colors.card,
+    borderRadius: 22,
+    paddingHorizontal: 32,
+    paddingVertical: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'space-between',
   },
-  macroDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+  calorieValue: {
+    color: colors.text,
+    fontSize: 30,
+    fontWeight: '700',
+    lineHeight: 36,
+  },
+  calorieValueRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+  },
+  calorieCopy: {
+    alignItems: 'flex-start',
+  },
+  calorieLabel: {
+    textAlign: 'left',
+    alignSelf: 'flex-start',
+  },
+  calorieGoal: {
+    color: colors.textMuted,
+    fontSize: 14,
+    fontWeight: '500',
+    marginLeft: 2,
+    marginBottom: 4,
+  },
+  healthCard: {
+    height: 120,
+    backgroundColor: colors.card,
+    borderRadius: 22,
+    paddingHorizontal: 32,
+    paddingVertical: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  healthCopy: {
+    alignItems: 'flex-start',
+  },
+  healthValue: {
+    color: colors.text,
+    fontSize: 26,
+    fontWeight: '700',
+    lineHeight: 32,
+  },
+  healthGoal: {
+    color: colors.textMuted,
+    fontSize: 14,
+    fontWeight: '500',
+    marginLeft: 2,
+    marginBottom: 3,
+  },
+  healthLabel: {
+    textAlign: 'left',
+    alignSelf: 'flex-start',
+  },
+  metricGrid: {
+    flexDirection: 'row',
+    gap: 10,
+    backgroundColor: colors.page,
+  },
+  metricCard: {
+    flexBasis: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
+    height: 120,
+    backgroundColor: colors.card,
+    borderRadius: 22,
+    paddingHorizontal: 6,
+    paddingVertical: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  metricValue: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '600',
+    lineHeight: 19,
+  },
+  metricValueRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  metricGoal: {
+    color: colors.textMuted,
+    fontSize: 9,
+    fontWeight: '500',
+    marginLeft: 1,
+    marginBottom: 1,
+  },
+  metricLabel: {
+    color: colors.textMuted,
+    fontSize: 12,
+    marginTop: 2,
+    marginBottom: 0,
+    textAlign: 'center',
   },
   macroLabel: {
-    color: colors.textSecondary,
-    fontSize: 14,
-    flex: 1,
+    fontSize: 10,
+    marginTop: 0,
   },
-  macroValue: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  barTrack: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.surfaceElevated,
-    overflow: 'hidden',
-  },
-  barFill: {
-    height: '100%',
-    borderRadius: 3,
+  mealsHeadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 8,
   },
   mealsHeading: {
     color: colors.text,
     fontSize: 16,
     fontWeight: '600',
-    marginTop: 8,
   },
-  mealItem: {
-    backgroundColor: colors.surfaceElevated,
-    borderRadius: 12,
-    padding: 12,
-    gap: 4,
+  mealPager: {
+    marginHorizontal: -20,
+    overflow: 'visible',
   },
-  mealTitle: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '600',
+  mealPage: {
+    paddingHorizontal: 20,
+    paddingVertical: 1,
   },
-  mealMeta: {
-    color: colors.textMuted,
-    fontSize: 13,
+  pagerDots: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 14,
+  },
+  pagerDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: 'transparent',
+  },
+  pagerDotActive: {
+    borderWidth: 1.5,
+    borderColor: colors.text,
+    backgroundColor: colors.text,
   },
   error: {
     color: '#FF6B6B',

@@ -1,5 +1,5 @@
 import { Link, Redirect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -8,76 +8,15 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/context/AuthContext';
 import { colors } from '@/constants/theme';
-import {
-  listNutritionAnalyses,
-  listRecipes,
-  type SavedNutrition,
-  type SavedRecipe,
-} from '@/lib/firestore';
-import {
-  getHistoryCacheSync,
-  loadHistoryCache,
-} from '@/lib/userHistoryCache';
 
 export default function ProfileScreen() {
   const { user, loading, signOut } = useAuth();
   const insets = useSafeAreaInsets();
   const [signingOut, setSigningOut] = useState(false);
-  const [recipes, setRecipes] = useState<SavedRecipe[]>([]);
-  const [analyses, setAnalyses] = useState<SavedNutrition[]>([]);
-  const [historyError, setHistoryError] = useState<string | null>(null);
-
-  const refreshFromNetwork = useCallback(async (uid: string) => {
-    setHistoryError(null);
-    try {
-      const [nextRecipes, nextAnalyses] = await Promise.all([
-        listRecipes(uid, 10),
-        listNutritionAnalyses(uid, 10),
-      ]);
-      setRecipes(nextRecipes);
-      setAnalyses(nextAnalyses);
-    } catch (err) {
-      setHistoryError(
-        err instanceof Error
-          ? err.message
-          : 'Could not load saved history from Firestore.',
-      );
-    }
-  }, []);
-
-  useFocusEffect(
-    useCallback(() => {
-      if (!user) return;
-      const uid = user.uid;
-      let active = true;
-
-      async function load() {
-        const syncCache = getHistoryCacheSync(uid);
-        if (syncCache) {
-          setRecipes(syncCache.recipes);
-          setAnalyses(syncCache.analyses);
-        } else {
-          const disk = await loadHistoryCache(uid);
-          if (!active) return;
-          setRecipes(disk?.recipes ?? []);
-          setAnalyses(disk?.analyses ?? []);
-        }
-
-        void refreshFromNetwork(uid);
-      }
-
-      void load();
-
-      return () => {
-        active = false;
-      };
-    }, [user, refreshFromNetwork]),
-  );
 
   if (!loading && !user) {
     return <Redirect href="/(auth)/login" />;
@@ -103,44 +42,6 @@ export default function ProfileScreen() {
           {user?.displayName || user?.email || 'Signed in to Savor IQ'}
         </Text>
       </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Saved recipes</Text>
-        {recipes.length === 0 ? (
-          <Text style={styles.empty}>No cloud-saved recipes yet.</Text>
-        ) : (
-          recipes.map((recipe) => (
-            <View key={recipe.id} style={styles.item}>
-              <Text style={styles.itemTitle} numberOfLines={1}>
-                {recipe.title}
-              </Text>
-              <Text style={styles.itemMeta} numberOfLines={1}>
-                {recipe.preparationMethod} · Serves {recipe.servings}
-              </Text>
-            </View>
-          ))
-        )}
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Nutrition history</Text>
-        {analyses.length === 0 ? (
-          <Text style={styles.empty}>No saved meal analyses yet.</Text>
-        ) : (
-          analyses.map((item) => (
-            <View key={item.id} style={styles.item}>
-              <Text style={styles.itemTitle} numberOfLines={1}>
-                {item.foodName}
-              </Text>
-              <Text style={styles.itemMeta} numberOfLines={1}>
-                {item.calories} kcal · Score {item.healthScore}/10
-              </Text>
-            </View>
-          ))
-        )}
-      </View>
-
-      {historyError ? <Text style={styles.error}>{historyError}</Text> : null}
 
       <Link href="/about" asChild>
         <Pressable style={styles.secondaryButton} accessibilityRole="button">
@@ -187,43 +88,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: 16,
     lineHeight: 22,
-  },
-  section: {
-    marginBottom: 24,
-  },
-  sectionTitle: {
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 12,
-  },
-  empty: {
-    color: colors.textMuted,
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  item: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 10,
-  },
-  itemTitle: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  itemMeta: {
-    color: colors.textMuted,
-    fontSize: 13,
-  },
-  error: {
-    color: '#FF6B6B',
-    marginBottom: 16,
-    lineHeight: 20,
   },
   button: {
     backgroundColor: colors.buttonPrimaryBg,
