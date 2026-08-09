@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Dimensions,
-  Image,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Pressable,
@@ -19,6 +18,7 @@ import { AvocadoIcon } from '@/components/AvocadoIcon';
 import { AnimatedNumber } from '@/components/AnimatedNumber';
 import { ProgressRing } from '@/components/ProgressRing';
 import { MealProcessingCard } from '@/components/MealProcessingCard';
+import { MealHistoryCard } from '@/components/MealHistoryCard';
 import { useAuth } from '@/context/AuthContext';
 import { colors } from '@/constants/theme';
 import {
@@ -132,14 +132,6 @@ function sumForDay(analyses: SavedNutrition[], day: Date) {
         count: 0,
       },
     );
-}
-
-function formatMealTime(createdAt: number | null): string {
-  if (createdAt == null) return '';
-  return new Date(createdAt).toLocaleTimeString(undefined, {
-    hour: 'numeric',
-    minute: '2-digit',
-  });
 }
 
 export default function HomeScreen() {
@@ -694,77 +686,14 @@ export default function HomeScreen() {
               {recentJobCards.map((job) => (
                 <MealProcessingCard key={job.id} job={job} />
               ))}
-              {recentMeals.map((item) => {
-              const timeLabel = formatMealTime(item.createdAt);
-              return (
-                <Pressable
+              {recentMeals.map((item) => (
+                <MealHistoryCard
                   key={item.id}
-                  style={styles.mealCard}
+                  item={item}
+                  style={styles.recentMealCard}
                   onPress={() => router.push(`/meal/${item.id}` as Href)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Open nutrition for ${item.foodName}`}
-                >
-                  {item.imageUrl ? (
-                    <Image
-                      source={{ uri: item.imageUrl }}
-                      style={styles.mealThumb}
-                    />
-                  ) : (
-                    <View style={[styles.mealThumb, styles.mealThumbFallback]}>
-                      <Ionicons
-                        name="restaurant-outline"
-                        size={28}
-                        color={colors.textMuted}
-                      />
-                    </View>
-                  )}
-                  <View style={styles.mealBody}>
-                    <View style={styles.mealTitleRow}>
-                      <Text style={styles.mealTitle} numberOfLines={1}>
-                        {item.foodName}
-                      </Text>
-                      {timeLabel ? (
-                        <Text style={styles.mealTime}>{timeLabel}</Text>
-                      ) : null}
-                    </View>
-                    <View style={styles.mealCalorieRow}>
-                      <Ionicons name="flame" size={18} color={colors.text} />
-                      <Text style={styles.mealCalories}>
-                        {Math.round(item.calories)} calories
-                      </Text>
-                    </View>
-                    <View style={styles.mealMacroRow}>
-                      <View style={styles.mealMacro}>
-                        <MaterialCommunityIcons
-                          name="food-drumstick"
-                          size={16}
-                          color="#E57373"
-                        />
-                        <Text style={styles.mealMacroText}>
-                          {Math.round(item.macros.protein)}g
-                        </Text>
-                      </View>
-                      <View style={styles.mealMacro}>
-                        <MaterialCommunityIcons
-                          name="barley"
-                          size={16}
-                          color="#FFA726"
-                        />
-                        <Text style={styles.mealMacroText}>
-                          {Math.round(item.macros.carbs)}g
-                        </Text>
-                      </View>
-                      <View style={styles.mealMacro}>
-                        <AvocadoIcon size={16} color="#66BB6A" />
-                        <Text style={styles.mealMacroText}>
-                          {Math.round(item.macros.fat)}g
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-                </Pressable>
-              );
-            })}
+                />
+              ))}
             </>
           )}
 
@@ -980,11 +909,12 @@ const styles = StyleSheet.create({
     width: 7,
     height: 7,
     borderRadius: 3.5,
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: 'transparent',
   },
   pagerDotActive: {
+    borderWidth: 1.5,
     borderColor: colors.text,
     backgroundColor: colors.text,
   },
@@ -1026,71 +956,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
   },
-  mealCard: {
-    backgroundColor: colors.card,
-    borderRadius: 18,
+  recentMealCard: {
     marginBottom: 12,
-    flexDirection: 'row',
-    overflow: 'hidden',
-    height: 120,
-  },
-  mealThumb: {
-    width: 108,
-    height: 120,
-    backgroundColor: colors.surfaceElevated,
-  },
-  mealThumbFallback: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  mealBody: {
-    flex: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    justifyContent: 'center',
-    gap: 8,
-  },
-  mealTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  mealTitle: {
-    flex: 1,
-    color: colors.text,
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  mealTime: {
-    color: colors.textMuted,
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  mealCalorieRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  mealCalories: {
-    color: colors.text,
-    fontSize: 17,
-    fontWeight: '600',
-    marginLeft: -2,
-  },
-  mealMacroRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-  },
-  mealMacro: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  mealMacroText: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '400',
   },
   error: {
     color: '#FF6B6B',
