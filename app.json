@@ -8,6 +8,7 @@
     "scheme": "savor-iq",
     "userInterfaceStyle": "light",
     "ios": {
+      "bundleIdentifier": "com.savoriq.app",
       "supportsTablet": true,
       "infoPlist": {
         "NSCameraUsageDescription": "Savor IQ uses the camera to analyze meal photos for nutrition estimates.",
@@ -15,6 +16,7 @@
       }
     },
     "android": {
+      "package": "com.savoriq.app",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -58,7 +60,8 @@
           "cameraPermission": "Allow Savor IQ to use your camera to analyze meal photos.",
           "photosPermission": "Allow Savor IQ to access your photos to analyze meals."
         }
-      ]
+      ],
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true

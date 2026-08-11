@@ -1,5 +1,7 @@
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import * as Google from 'expo-auth-session/providers/google';
 import { router } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -38,6 +40,8 @@ import {
 } from '@/lib/onboarding';
 
 const TOTAL_STEPS = 9;
+
+WebBrowser.maybeCompleteAuthSession();
 
 function isAtLeast13(birthDate: string) {
   const [year, month, day] = birthDate.split('-').map(Number);
@@ -352,7 +356,7 @@ function PlanProcessing({ onComplete }: { onComplete: () => void }) {
 }
 
 export default function OnboardingScreen() {
-  const { configured, signIn, signUp } = useAuth();
+  const { configured, signIn, signInWithGoogle, signUp } = useAuth();
   const [step, setStep] = useState(0);
   const [profile, setProfile] = useState<OnboardingProfile>(defaultOnboardingProfile);
   const [weightUnit, setWeightUnit] = useState<'lbs' | 'kg'>('lbs');
@@ -445,6 +449,20 @@ export default function OnboardingScreen() {
     }
   }
 
+  async function submitGoogleAuth(idToken: string) {
+    setSubmitting(true);
+    setAuthError(null);
+    try {
+      await signInWithGoogle(idToken);
+      setAuthMode(null);
+      router.replace('/(tabs)');
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Unable to continue with Google.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   const authIsland = (
     <AuthIsland
       visible={authMode !== null}
@@ -458,6 +476,7 @@ export default function OnboardingScreen() {
       submitting={submitting}
       onClose={closeAuth}
       onShowEmail={() => setShowEmail(true)}
+      onGoogleToken={submitGoogleAuth}
       onNameChange={setName}
       onEmailChange={setEmail}
       onPasswordChange={setPassword}
@@ -642,10 +661,11 @@ export default function OnboardingScreen() {
               <Ionicons name="logo-apple" size={28} color="#FFFFFF" />
               <Text style={styles.appleButtonText}>Sign in with Apple</Text>
             </Pressable>
-            <Pressable style={styles.providerButton} onPress={() => Alert.alert('Google sign-in', 'This option will be available soon.')}>
-              <GoogleIcon />
-              <Text style={styles.providerButtonText}>Sign in with Google</Text>
-            </Pressable>
+            <GoogleAuthButton
+              disabled={!configured || submitting}
+              onError={(message) => Alert.alert('Google sign-in', message)}
+              onToken={submitGoogleAuth}
+            />
             <Pressable style={styles.providerButton} onPress={() => openEmailAuth('signup')}>
               <Ionicons name="mail-outline" size={27} color={colors.text} />
               <Text style={styles.providerButtonText}>Continue with email</Text>
@@ -726,6 +746,7 @@ function AuthIsland({
   submitting,
   onClose,
   onShowEmail,
+  onGoogleToken,
   onNameChange,
   onEmailChange,
   onPasswordChange,
@@ -742,6 +763,7 @@ function AuthIsland({
   submitting: boolean;
   onClose: () => void;
   onShowEmail: () => void;
+  onGoogleToken: (idToken: string) => Promise<void>;
   onNameChange: (value: string) => void;
   onEmailChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
@@ -850,10 +872,11 @@ function AuthIsland({
                   <Ionicons name="logo-apple" size={28} color="#FFFFFF" />
                   <Text style={styles.appleButtonText}>Sign in with Apple</Text>
                 </Pressable>
-                <Pressable style={styles.providerButton} onPress={() => futureAuth('Google')}>
-                  <GoogleIcon />
-                  <Text style={styles.providerButtonText}>Sign in with Google</Text>
-                </Pressable>
+                <GoogleAuthButton
+                  disabled={!configured || submitting}
+                  onError={(message) => Alert.alert('Google sign-in', message)}
+                  onToken={onGoogleToken}
+                />
                 <Pressable style={styles.providerButton} onPress={onShowEmail}>
                   <Ionicons name="mail-outline" size={27} color={colors.text} />
                   <Text style={styles.providerButtonText}>Continue with email</Text>
@@ -881,6 +904,75 @@ function AuthIsland({
         </Animated.View>
       </KeyboardAvoidingView>
     </Modal>
+  );
+}
+
+function GoogleAuthButton({
+  disabled,
+  onError,
+  onToken,
+}: {
+  disabled: boolean;
+  onError: (message: string) => void;
+  onToken: (idToken: string) => Promise<void>;
+}) {
+  const clientIds = {
+    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
+    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+    webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+  };
+  const platformClientId = Platform.select({
+    android: clientIds.androidClientId,
+    ios: clientIds.iosClientId,
+    default: clientIds.webClientId,
+  });
+  const googleConfigured = Boolean(platformClientId);
+  const [request, response, promptAsync] = Google.useIdTokenAuthRequest({
+    ...clientIds,
+    clientId: platformClientId ?? 'google-client-id-not-configured',
+    selectAccount: true,
+  });
+  const handledResponse = useRef<typeof response>(null);
+
+  useEffect(() => {
+    if (!response || handledResponse.current === response) return;
+    handledResponse.current = response;
+    if (response.type === 'dismiss' || response.type === 'cancel' || response.type === 'opened' || response.type === 'locked') return;
+    if (response.type === 'error') {
+      onError(response.error?.message ?? 'Google sign-in did not complete.');
+      return;
+    }
+    if (response.type !== 'success') return;
+
+    const idToken = response.params.id_token ?? response.authentication?.idToken;
+    if (!idToken) {
+      onError('Google did not return an ID token. Check the OAuth client configuration.');
+      return;
+    }
+    void onToken(idToken);
+  }, [onError, onToken, response]);
+
+  async function startGoogleAuth() {
+    if (!googleConfigured) {
+      onError('Google sign-in is not configured for this platform.');
+      return;
+    }
+    try {
+      await promptAsync();
+    } catch (error) {
+      onError(error instanceof Error ? error.message : 'Unable to open Google sign-in.');
+    }
+  }
+
+  return (
+    <Pressable
+      style={[styles.providerButton, (disabled || !request) && styles.authSubmitDisabled]}
+      disabled={disabled || !request}
+      onPress={startGoogleAuth}
+    >
+      <GoogleIcon />
+      <Text style={styles.providerButtonText}>Sign in with Google</Text>
+    </Pressable>
   );
 }
 
