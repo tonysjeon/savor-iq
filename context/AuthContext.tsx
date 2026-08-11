@@ -18,6 +18,11 @@ import {
 
 import { auth, isFirebaseConfigured } from '@/lib/firebase';
 import { saveUserProfile } from '@/lib/firestore';
+import {
+  calculateRecommendation,
+  clearOnboardingDraft,
+  getOnboardingDraft,
+} from '@/lib/onboarding';
 
 type AuthContextValue = {
   user: User | null;
@@ -63,11 +68,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await updateProfile(credential.user, { displayName });
     }
     try {
+      const onboarding = await getOnboardingDraft();
       await saveUserProfile({
         uid: credential.user.uid,
         name: displayName,
         email: email.trim(),
+        onboarding: onboarding ?? undefined,
+        recommendation: onboarding ? calculateRecommendation(onboarding) : undefined,
       });
+      if (onboarding) await clearOnboardingDraft();
     } catch {
       // Profile doc is best-effort; auth account still succeeds.
     }
