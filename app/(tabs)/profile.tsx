@@ -1,4 +1,4 @@
-import { Link, Redirect } from 'expo-router';
+import { Link, Redirect, router, type Href } from 'expo-router';
 import { useState } from 'react';
 import {
   ActivityIndicator,
@@ -19,13 +19,14 @@ export default function ProfileScreen() {
   const [signingOut, setSigningOut] = useState(false);
 
   if (!loading && !user) {
-    return <Redirect href="/(auth)/login" />;
+    return <Redirect href={'/onboarding' as Href} />;
   }
 
   async function onSignOut() {
     setSigningOut(true);
     try {
       await signOut();
+      router.replace('/onboarding' as Href);
     } finally {
       setSigningOut(false);
     }

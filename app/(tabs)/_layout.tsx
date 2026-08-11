@@ -1,4 +1,4 @@
-import { Redirect, Tabs } from 'expo-router';
+import { Redirect, Tabs, type Href } from 'expo-router';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { AppTabBar } from '@/components/AppTabBar';
@@ -17,7 +17,7 @@ export default function TabsLayout() {
   }
 
   if (!user) {
-    return <Redirect href="/(auth)/login" />;
+    return <Redirect href={'/onboarding' as Href} />;
   }
 
   return (
