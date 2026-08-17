@@ -769,7 +769,9 @@ function AuthIsland({
   onPasswordChange: (value: string) => void;
   onSubmit: () => void;
 }) {
-  const screenHeight = Dimensions.get('window').height;
+  // Keep the animation coordinate space stable while the iOS keyboard changes
+  // the reported window height as focus moves between fields.
+  const screenHeight = useRef(Dimensions.get('window').height).current;
   const dismissThreshold = screenHeight * 0.18;
   const translateY = useRef(new Animated.Value(screenHeight)).current;
   const [mounted, setMounted] = useState(visible);
@@ -1014,6 +1016,7 @@ const WHEEL_ITEM_HEIGHT = 40;
 const WHEEL_VISIBLE_ROWS = 5;
 const WHEEL_CENTER_ROW = Math.floor(WHEEL_VISIBLE_ROWS / 2);
 const WHEEL_PAD = WHEEL_ITEM_HEIGHT * WHEEL_CENTER_ROW;
+const BIRTHDAY_WHEEL_DECELERATION_RATE = 0.994;
 const MIN_BIRTH_YEAR = 1900;
 const MAX_BIRTH_YEAR = 2026;
 const MONTH_NAMES = [
@@ -1064,6 +1067,20 @@ function wheelInputRange(index: number) {
   return WHEEL_ROW_OFFSETS.map((offset) => (index - offset) * WHEEL_ITEM_HEIGHT);
 }
 
+function wheelRestingStyle(index: number, scrollPosition: number) {
+  const offset = Math.max(-WHEEL_CURVE_LIMIT, Math.min(WHEEL_CURVE_LIMIT, index - scrollPosition));
+  const distance = Math.abs(offset);
+  const opacity = distance <= 1 ? 1 - distance * 0.7 : Math.max(0.08, 0.3 - (distance - 1) * 0.14);
+  return {
+    opacity,
+    transform: [
+      { perspective: WHEEL_PERSPECTIVE },
+      { rotateX: `${-offset * WHEEL_ROW_ANGLE_DEG}deg` },
+      { translateY: WHEEL_RADIUS * Math.sin(offset * WHEEL_ROW_ANGLE) - offset * WHEEL_ITEM_HEIGHT },
+    ],
+  };
+}
+
 const formatNumberLabel = (value: number) => String(value);
 const formatMonthLabel = (value: number) => MONTH_NAMES[value - 1];
 const formatFeetLabel = (value: number) => `${value} ft`;
@@ -1082,6 +1099,7 @@ function WheelColumn({
   hitSlop,
   itemStyle,
   formatLabel = formatNumberLabel,
+  useNativeScrollDriver = true,
 }: {
   values: number[];
   selectedValue: number;
@@ -1094,21 +1112,24 @@ function WheelColumn({
   hitSlop?: Insets;
   itemStyle?: object;
   formatLabel?: (value: number) => string;
+  useNativeScrollDriver?: boolean;
 }) {
   const selectedIndex = Math.max(0, values.indexOf(selectedValue));
+  const selectedOffset = selectedIndex * WHEEL_ITEM_HEIGHT;
   const scrollRef = useRef<ScrollView>(null);
-  const scrollY = useRef(new Animated.Value(selectedIndex * WHEEL_ITEM_HEIGHT)).current;
+  const scrollY = useRef(new Animated.Value(selectedOffset)).current;
   const isDragging = useRef(false);
   const [curveEpoch, setCurveEpoch] = useState(0);
+  const [jsScrollOffset, setJsScrollOffset] = useState(selectedOffset);
 
   useEffect(() => {
     if (isDragging.current) return;
-    const offset = selectedIndex * WHEEL_ITEM_HEIGHT;
-    scrollY.setValue(offset);
+    scrollY.setValue(selectedOffset);
+    if (!useNativeScrollDriver) setJsScrollOffset(selectedOffset);
     requestAnimationFrame(() => {
-      scrollRef.current?.scrollTo({ y: offset, animated: false });
+      scrollRef.current?.scrollTo({ y: selectedOffset, animated: false });
     });
-  }, [scrollY, selectedIndex, values.length]);
+  }, [scrollY, selectedOffset, useNativeScrollDriver, values.length]);
 
   // The curve is driven natively, and the native driver only pushes transforms
   // to the row views when its value changes. A column that mounts already
@@ -1116,6 +1137,7 @@ function WheelColumn({
   // the first scroll. Remounting the rows and then nudging the offset by a
   // sub-pixel amount forces the resting curve out on every column.
   useEffect(() => {
+    if (!useNativeScrollDriver) return;
     const mountedIndex = selectedIndex;
     let nudge = 0;
     const rebuild = requestAnimationFrame(() => {
@@ -1141,6 +1163,32 @@ function WheelColumn({
     () =>
       values.map((item, index) => {
         const inputRange = wheelInputRange(index);
+        const curveStyle = useNativeScrollDriver
+            ? {
+                opacity: scrollY.interpolate({
+                  inputRange,
+                  outputRange: WHEEL_CURVE_OPACITY,
+                  extrapolate: 'clamp',
+                }),
+                transform: [
+                  { perspective: WHEEL_PERSPECTIVE },
+                  {
+                    rotateX: scrollY.interpolate({
+                      inputRange,
+                      outputRange: WHEEL_CURVE_ROTATE_X,
+                      extrapolate: 'clamp',
+                    }),
+                  },
+                  {
+                    translateY: scrollY.interpolate({
+                      inputRange,
+                      outputRange: WHEEL_CURVE_TRANSLATE_Y,
+                      extrapolate: 'clamp',
+                    }),
+                  },
+                ],
+              }
+            : wheelRestingStyle(index, jsScrollOffset / WHEEL_ITEM_HEIGHT);
         return (
           <View
             key={`${item}-${index}`}
@@ -1149,49 +1197,40 @@ function WheelColumn({
               align === 'left' && styles.wheelItemLeft,
               align === 'right' && styles.wheelItemRight,
               itemStyle,
+              !useNativeScrollDriver && curveStyle,
             ]}
           >
-            <Animated.Text
-              numberOfLines={1}
-              style={[
-                styles.wheelItemText,
-                align === 'left' && styles.wheelItemTextLeft,
-                align === 'right' && styles.wheelItemTextRight,
-                {
-                  opacity: scrollY.interpolate({
-                    inputRange,
-                    outputRange: WHEEL_CURVE_OPACITY,
-                    extrapolate: 'clamp',
-                  }),
-                  transform: [
-                    { perspective: WHEEL_PERSPECTIVE },
-                    {
-                      rotateX: scrollY.interpolate({
-                        inputRange,
-                        outputRange: WHEEL_CURVE_ROTATE_X,
-                        extrapolate: 'clamp',
-                      }),
-                    },
-                    {
-                      translateY: scrollY.interpolate({
-                        inputRange,
-                        outputRange: WHEEL_CURVE_TRANSLATE_Y,
-                        extrapolate: 'clamp',
-                      }),
-                    },
-                  ],
-                },
-              ]}
-            >
-              {formatLabel(item)}
-            </Animated.Text>
+            {useNativeScrollDriver ? (
+              <Animated.Text
+                numberOfLines={1}
+                style={[
+                  styles.wheelItemText,
+                  align === 'left' && styles.wheelItemTextLeft,
+                  align === 'right' && styles.wheelItemTextRight,
+                  curveStyle,
+                ]}
+              >
+                {formatLabel(item)}
+              </Animated.Text>
+            ) : (
+              <Text
+                numberOfLines={1}
+                style={[
+                  styles.wheelItemText,
+                  align === 'left' && styles.wheelItemTextLeft,
+                  align === 'right' && styles.wheelItemTextRight,
+                ]}
+              >
+                {formatLabel(item)}
+              </Text>
+            )}
           </View>
         );
       }),
     // `curveEpoch` is the first-paint republish above; it belongs here even
     // though the rows never read it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [align, curveEpoch, formatLabel, itemStyle, scrollY, values],
+    [align, curveEpoch, formatLabel, itemStyle, jsScrollOffset, scrollY, useNativeScrollDriver, values],
   );
 
   const settle = (offsetY: number) => {
@@ -1221,7 +1260,11 @@ function WheelColumn({
       onScrollBeginDrag={() => {
         isDragging.current = true;
       }}
-      onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
+      onScroll={
+        useNativeScrollDriver
+          ? Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })
+          : (event) => setJsScrollOffset(event.nativeEvent.contentOffset.y)
+      }
       onMomentumScrollEnd={(event) => {
         isDragging.current = false;
         settle(event.nativeEvent.contentOffset.y);
@@ -1284,7 +1327,7 @@ function BirthDateSelector({ value, onChange }: { value: string; onChange: (valu
           <WheelColumn
             width={130}
             itemStyle={styles.monthWheelTouchItem}
-            decelerationRate="normal"
+            decelerationRate={BIRTHDAY_WHEEL_DECELERATION_RATE}
             bounces
             style={[styles.monthWheelColumn, styles.monthWheelTouchColumn]}
             values={MONTH_VALUES}
@@ -1294,17 +1337,18 @@ function BirthDateSelector({ value, onChange }: { value: string; onChange: (valu
           />
           <WheelColumn
             width={44}
-            decelerationRate="normal"
+            decelerationRate={BIRTHDAY_WHEEL_DECELERATION_RATE}
             bounces
             style={styles.dayWheelColumn}
             values={dayValues}
             selectedValue={Math.min(day, dayCount)}
             onChange={(next) => setPart(year, month, next)}
+            useNativeScrollDriver={false}
           />
           <WheelColumn
             width={104}
             itemStyle={styles.yearWheelTouchItem}
-            decelerationRate="normal"
+            decelerationRate={BIRTHDAY_WHEEL_DECELERATION_RATE}
             bounces
             style={styles.yearWheelTouchColumn}
             values={YEAR_VALUES}
@@ -1944,10 +1988,10 @@ const styles = StyleSheet.create({
   modalRoot: { flex: 1, justifyContent: 'flex-end' },
   modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.22)' },
   authIsland: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 36, borderTopRightRadius: 36, overflow: 'hidden' },
-  authHeader: { minHeight: 68, borderBottomWidth: 1, borderBottomColor: '#E7E7E7', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
+  authHeader: { minHeight: 66, borderBottomWidth: 1, borderBottomColor: '#E7E7E7', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
   authTitle: { fontSize: 23, fontWeight: '600', color: colors.text },
   closeButton: { position: 'absolute', top: 15, right: 22, zIndex: 2, width: 38, height: 38, borderRadius: 19, backgroundColor: '#F8F8F8', alignItems: 'center', justifyContent: 'center' },
-  authBody: { paddingHorizontal: 28, paddingTop: 28, paddingBottom: 52, gap: 14 },
+  authBody: { paddingHorizontal: 28, paddingTop: 26, paddingBottom: 46, gap: 14 },
   providerButton: { minHeight: 56, borderRadius: 28, borderWidth: 1.5, borderColor: '#D9D9DF', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16 },
   appleButton: { backgroundColor: '#000000', borderColor: '#000000' },
   appleButtonText: { color: '#FFFFFF', fontSize: 18, fontWeight: '600' },
