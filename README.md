@@ -7,7 +7,7 @@ AI-assisted recipe and meal planning for iOS, built with Expo.
 - **Expo** (React Native) — test on device with Expo Go
 - **TypeScript**
 - **Expo Router** — file-based navigation
-- **Firebase Auth** — email/password (configure via `.env`)
+- **Firebase Auth** — email/password and Google OAuth (configure via `.env`)
 - **Cloud Firestore** — save recipes and nutrition history per signed-in user
 - **Gemini** — recipes from text + meal photo nutrition (`EXPO_PUBLIC_GEMINI_API_KEY`)
 - **expo-camera** — in-app meal capture for Analyze (frame guide, retake)
@@ -18,7 +18,7 @@ AI-assisted recipe and meal planning for iOS, built with Expo.
 - Node.js 20.19+
 - [Expo Go](https://expo.dev/go) on your iPhone (**SDK 54** — current App Store version)
 - Same Wi‑Fi network as your Mac (or use tunnel mode)
-- A Firebase project with Email/Password auth enabled
+- A Firebase project with Email/Password and Google auth enabled
 - Cloud Firestore created in that Firebase project (start in test mode, then apply the rules below)
 - A [Google AI Studio](https://aistudio.google.com/apikey) Gemini API key
 
@@ -69,6 +69,9 @@ ref/           # Local Flutter reference (gitignored)
 - **Calendar** tab: month view of analyzed meals; select a day for macros and meal list.
 - **Profile** shows cloud recipe and nutrition history.
 - Auth screens work once Firebase env vars are set.
+- Google sign-in also requires Web, iOS, and Android OAuth client IDs in the
+  corresponding `EXPO_PUBLIC_GOOGLE_*_CLIENT_ID` variables. Add the app's OAuth
+  redirect URI to the clients' authorized redirect URIs in Google Cloud.
 - Voice input is not wired up yet.
 - `EXPO_PUBLIC_*` keys are bundled into the client — fine for Expo Go prototyping; use a backend proxy before shipping.
 

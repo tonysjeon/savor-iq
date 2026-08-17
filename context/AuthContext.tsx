@@ -1,7 +1,10 @@
 import {
+  GoogleAuthProvider,
   User,
   createUserWithEmailAndPassword,
+  getAdditionalUserInfo,
   onAuthStateChanged,
+  signInWithCredential,
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
   updateProfile,
@@ -18,12 +21,18 @@ import {
 
 import { auth, isFirebaseConfigured } from '@/lib/firebase';
 import { saveUserProfile } from '@/lib/firestore';
+import {
+  calculateRecommendation,
+  clearOnboardingDraft,
+  getOnboardingDraft,
+} from '@/lib/onboarding';
 
 type AuthContextValue = {
   user: User | null;
   loading: boolean;
   configured: boolean;
   signIn: (email: string, password: string) => Promise<void>;
+  signInWithGoogle: (idToken: string) => Promise<void>;
   signUp: (name: string, email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
 };
@@ -63,11 +72,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await updateProfile(credential.user, { displayName });
     }
     try {
+      const onboarding = await getOnboardingDraft();
       await saveUserProfile({
         uid: credential.user.uid,
         name: displayName,
         email: email.trim(),
+        onboarding: onboarding ?? undefined,
+        recommendation: onboarding ? calculateRecommendation(onboarding) : undefined,
       });
+      if (onboarding) await clearOnboardingDraft();
+    } catch {
+      // Profile doc is best-effort; auth account still succeeds.
+    }
+  }, []);
+
+  const signInWithGoogle = useCallback(async (idToken: string) => {
+    if (!auth) {
+      throw new Error('Firebase is not configured. Add EXPO_PUBLIC_FIREBASE_* to your .env.');
+    }
+
+    const credential = await signInWithCredential(
+      auth,
+      GoogleAuthProvider.credential(idToken),
+    );
+
+    if (!getAdditionalUserInfo(credential)?.isNewUser) return;
+
+    try {
+      const onboarding = await getOnboardingDraft();
+      await saveUserProfile({
+        uid: credential.user.uid,
+        name: credential.user.displayName ?? '',
+        email: credential.user.email ?? '',
+        onboarding: onboarding ?? undefined,
+        recommendation: onboarding ? calculateRecommendation(onboarding) : undefined,
+      });
+      if (onboarding) await clearOnboardingDraft();
     } catch {
       // Profile doc is best-effort; auth account still succeeds.
     }
@@ -84,10 +124,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       configured: isFirebaseConfigured,
       signIn,
+      signInWithGoogle,
       signUp,
       signOut,
     }),
-    [user, loading, signIn, signUp, signOut],
+    [user, loading, signIn, signInWithGoogle, signUp, signOut],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

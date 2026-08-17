@@ -26,6 +26,7 @@ import {
 } from '@/lib/userHistoryCache';
 import type { NutritionInfo } from '@/types/nutrition';
 import type { Recipe } from '@/types/recipe';
+import type { NutritionRecommendation, OnboardingProfile } from '@/lib/onboarding';
 
 export type SavedRecipe = Recipe & { id: string };
 export type SavedNutrition = NutritionInfo & {
@@ -150,6 +151,8 @@ export async function saveUserProfile(params: {
   uid: string;
   name: string;
   email: string;
+  onboarding?: OnboardingProfile;
+  recommendation?: NutritionRecommendation;
 }): Promise<void> {
   const firestore = requireDb();
   await setDoc(
@@ -157,6 +160,13 @@ export async function saveUserProfile(params: {
     {
       name: params.name,
       email: params.email,
+      ...(params.onboarding
+        ? {
+            onboarding: params.onboarding,
+            nutritionRecommendation: params.recommendation,
+            onboardingCompletedAt: serverTimestamp(),
+          }
+        : {}),
       updatedAt: serverTimestamp(),
       createdAt: serverTimestamp(),
     },
