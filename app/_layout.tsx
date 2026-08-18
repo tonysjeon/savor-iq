@@ -2,10 +2,12 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 
 import { AuthProvider } from '@/context/AuthContext';
+import { LanguageProvider } from '@/context/LanguageContext';
 import { colors } from '@/constants/theme';
 
 export default function RootLayout() {
   return (
+    <LanguageProvider>
     <AuthProvider>
       <StatusBar style="dark" />
       <Stack
@@ -36,5 +38,6 @@ export default function RootLayout() {
         <Stack.Screen name="meal/[id]" options={{ headerShown: false }} />
       </Stack>
     </AuthProvider>
+    </LanguageProvider>
   );
 }
