@@ -31,7 +31,7 @@ export default function RootLayout() {
             contentStyle: { backgroundColor: 'transparent' },
           }}
         />
-        <Stack.Screen name="about" options={{ headerShown: false }} />
+        <Stack.Screen name="account" options={{ headerShown: false }} />
         <Stack.Screen name="bmi-info" options={{ headerShown: false }} />
         <Stack.Screen name="meal/[id]" options={{ headerShown: false }} />
       </Stack>
