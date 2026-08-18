@@ -5,6 +5,7 @@ import { type Href, router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors } from '@/constants/theme';
+import { useLanguage } from '@/context/LanguageContext';
 
 const LEFT_ROUTES = ['index', 'chat'] as const;
 const RIGHT_ROUTES = ['calendar', 'profile'] as const;
@@ -19,11 +20,11 @@ const ICONS: Record<
   calendar: { outline: 'calendar-outline', filled: 'calendar' },
 };
 
-const LABELS: Record<string, string> = {
-  index: 'Home',
-  chat: 'Chat',
-  calendar: 'Calendar',
-  profile: 'Progress',
+const LABELS: Record<string, 'tabs.home' | 'tabs.chat' | 'tabs.calendar' | 'tabs.progress'> = {
+  index: 'tabs.home',
+  chat: 'tabs.chat',
+  calendar: 'tabs.calendar',
+  profile: 'tabs.progress',
 };
 
 function TabItem({
@@ -37,17 +38,20 @@ function TabItem({
   onPress: () => void;
   onLongPress: () => void;
 }) {
+  const { t } = useLanguage();
   const color = focused ? colors.tabActive : colors.tabInactive;
   const icons = ICONS[routeName];
   const icon = focused
     ? (icons?.filled ?? 'ellipse')
     : (icons?.outline ?? 'ellipse-outline');
 
+  const label = LABELS[routeName] ? t(LABELS[routeName]) : routeName;
+
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityState={focused ? { selected: true } : {}}
-      accessibilityLabel={LABELS[routeName] ?? routeName}
+      accessibilityLabel={label}
       onPress={onPress}
       onLongPress={onLongPress}
       style={({ pressed }) => [
@@ -57,7 +61,7 @@ function TabItem({
       ]}
     >
       {routeName === 'profile' ? (
-        <View style={styles.progressIcon} accessibilityLabel="Progress chart">
+        <View style={styles.progressIcon} accessibilityLabel={t('tabs.progressChart')}>
           {[8, 13, 18].map((height) => (
             <View
               key={height}
@@ -76,13 +80,14 @@ function TabItem({
       ) : (
         <Ionicons name={icon} size={22} color={color} />
       )}
-      <Text style={[styles.label, { color }]}>{LABELS[routeName] ?? routeName}</Text>
+      <Text style={[styles.label, { color }]}>{label}</Text>
     </Pressable>
   );
 }
 
 export function AppTabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
+  const { t } = useLanguage();
 
   function renderTab(routeName: string) {
     const route = state.routes.find((item) => item.name === routeName);
@@ -130,7 +135,7 @@ export function AppTabBar({ state, navigation }: BottomTabBarProps) {
 
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Analyze meal"
+          accessibilityLabel={t('tabs.analyzeMeal')}
           hitSlop={8}
           onPress={() => router.push(ANALYZE_HREF)}
           style={({ pressed }) => [styles.plusWrap, pressed && styles.plusPressed]}

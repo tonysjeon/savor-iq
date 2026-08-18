@@ -18,6 +18,8 @@ import { MealHistoryCard } from '@/components/MealHistoryCard';
 import { AvocadoIcon } from '@/components/AvocadoIcon';
 import { ProgressRing } from '@/components/ProgressRing';
 import { useAuth } from '@/context/AuthContext';
+import { useLanguage } from '@/context/LanguageContext';
+import type { MessageKey } from '@/lib/i18n';
 import { colors } from '@/constants/theme';
 import { PageHeader } from '@/components/PageHeader';
 import {
@@ -30,7 +32,15 @@ import {
   subscribeHistoryCache,
 } from '@/lib/userHistoryCache';
 
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+const WEEKDAY_KEYS = [
+  'calendar.weekday.sun',
+  'calendar.weekday.mon',
+  'calendar.weekday.tue',
+  'calendar.weekday.wed',
+  'calendar.weekday.thu',
+  'calendar.weekday.fri',
+  'calendar.weekday.sat',
+] as const;
 
 const MACRO_COLORS = {
   protein: '#E57373',
@@ -129,6 +139,7 @@ function sumMeals(meals: SavedNutrition[]) {
 
 export default function CalendarScreen() {
   const { user } = useAuth();
+  const { t, locale } = useLanguage();
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
   const today = useMemo(() => new Date(), []);
@@ -200,7 +211,7 @@ export default function CalendarScreen() {
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
   const weeks = useMemo(() => monthMatrix(year, month), [year, month]);
-  const monthLabel = cursor.toLocaleString(undefined, {
+  const monthLabel = cursor.toLocaleString(locale, {
     month: 'long',
     year: 'numeric',
   });
@@ -258,7 +269,7 @@ export default function CalendarScreen() {
   }
 
   const selectedLabel = selected
-    ? selected.toLocaleDateString(undefined, {
+    ? selected.toLocaleDateString(locale, {
         weekday: 'long',
         month: 'short',
         day: 'numeric',
@@ -270,13 +281,13 @@ export default function CalendarScreen() {
       style={styles.flex}
       contentContainerStyle={[styles.content, { paddingTop: insets.top + 8 }]}
     >
-      <PageHeader title="Calendar" />
+      <PageHeader title={t('tabs.calendar')} />
       <View style={styles.calendarCard}>
       <View style={styles.monthHeader}>
         <Pressable
           style={styles.monthNav}
           onPress={() => shiftMonth(-1)}
-          accessibilityLabel="Previous month"
+          accessibilityLabel={t('calendar.previousMonth')}
         >
           <Ionicons name="chevron-back" size={18} color={colors.text} />
         </Pressable>
@@ -284,16 +295,16 @@ export default function CalendarScreen() {
         <Pressable
           style={styles.monthNav}
           onPress={() => shiftMonth(1)}
-          accessibilityLabel="Next month"
+          accessibilityLabel={t('calendar.nextMonth')}
         >
           <Ionicons name="chevron-forward" size={18} color={colors.text} />
         </Pressable>
       </View>
 
       <View style={styles.weekdayRow}>
-        {WEEKDAYS.map((day) => (
+        {WEEKDAY_KEYS.map((day) => (
           <Text key={day} style={styles.weekday}>
-            {day}
+            {t(day)}
           </Text>
         ))}
       </View>
@@ -346,7 +357,7 @@ export default function CalendarScreen() {
           <Text style={styles.detailTitle}>{selectedLabel}</Text>
 
           {selectedMeals.length === 0 ? (
-            <Text style={styles.empty}>No meals logged this day.</Text>
+            <Text style={styles.empty}>{t('calendar.noMeals')}</Text>
           ) : (
             <>
               <View style={styles.nutritionSection}>
@@ -373,7 +384,7 @@ export default function CalendarScreen() {
                           </Text>
                         </View>
                         <Text style={[styles.metricLabel, styles.calorieLabel]}>
-                          Calories eaten
+                          {t('home.caloriesEaten')}
                         </Text>
                       </View>
                       <ProgressRing
@@ -399,7 +410,7 @@ export default function CalendarScreen() {
                               </Text>
                             </View>
                             <Text style={[styles.metricLabel, styles.macroLabel]}>
-                              {macro.label} eaten
+                              {t(`home.${macro.key}` as MessageKey)} {t('common.eaten')}
                             </Text>
                           </View>
                           <ProgressRing
@@ -433,7 +444,7 @@ export default function CalendarScreen() {
                           <Text style={styles.healthGoal}>/10</Text>
                         </View>
                         <Text style={[styles.metricLabel, styles.healthLabel]}>
-                          Health score
+                          {t('home.healthScore')}
                         </Text>
                       </View>
                       <ProgressRing
@@ -465,7 +476,7 @@ export default function CalendarScreen() {
                             </Text>
                           </View>
                           <Text style={[styles.metricLabel, styles.macroLabel]}>
-                            {macro.label} eaten
+                            {t(`home.${macro.key}` as MessageKey)} {t('common.eaten')}
                           </Text>
                         </View>
                         <ProgressRing
@@ -501,7 +512,7 @@ export default function CalendarScreen() {
               </View>
 
               <View style={styles.mealsHeadingRow}>
-                <Text style={styles.mealsHeading}>Meals</Text>
+                <Text style={styles.mealsHeading}>{t('calendar.meals')}</Text>
               </View>
               <View style={styles.mealPager}>
                 <ScrollView
@@ -562,6 +573,17 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 40,
     backgroundColor: colors.page,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 18,
+  },
+  title: {
+    color: colors.text,
+    fontSize: 28,
+    fontWeight: '500',
+    letterSpacing: -0.5,
   },
   calendarCard: {
     backgroundColor: colors.card,
