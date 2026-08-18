@@ -1,6 +1,7 @@
 import { StyleSheet, Text, View } from 'react-native';
 
 import { colors } from '@/constants/theme';
+import { useLanguage } from '@/context/LanguageContext';
 import type { NutritionInfo } from '@/types/nutrition';
 
 type NutritionCardProps = {
@@ -23,24 +24,25 @@ function healthScoreColor(score: number): string {
 }
 
 export function NutritionCard({ info }: NutritionCardProps) {
+  const { t } = useLanguage();
   const { protein, carbs, fat, fiber } = info.macros;
   const sugar = info.macros.sugar ?? 0;
   const sodium = info.macros.sodium ?? 0;
   const total = protein + carbs + fat + fiber + sugar || 1;
 
   const macros = [
-    { key: 'protein', label: 'Protein', value: protein, color: MACRO_COLORS.protein },
-    { key: 'carbs', label: 'Carbs', value: carbs, color: MACRO_COLORS.carbs },
-    { key: 'fat', label: 'Fat', value: fat, color: MACRO_COLORS.fat },
-    { key: 'fiber', label: 'Fiber', value: fiber, color: MACRO_COLORS.fiber },
-    { key: 'sugar', label: 'Sugar', value: sugar, color: MACRO_COLORS.sugar },
+    { key: 'protein', label: t('home.protein'), value: protein, color: MACRO_COLORS.protein },
+    { key: 'carbs', label: t('home.carbs'), value: carbs, color: MACRO_COLORS.carbs },
+    { key: 'fat', label: t('home.fat'), value: fat, color: MACRO_COLORS.fat },
+    { key: 'fiber', label: t('home.fiber'), value: fiber, color: MACRO_COLORS.fiber },
+    { key: 'sugar', label: t('home.sugar'), value: sugar, color: MACRO_COLORS.sugar },
   ] as const;
 
   return (
     <View style={styles.card}>
       <View style={styles.header}>
         <View style={styles.headerText}>
-          <Text style={styles.eyebrow}>Nutrition Analysis</Text>
+          <Text style={styles.eyebrow}>{t('meal.nutritionAnalysis')}</Text>
           <Text style={styles.foodName}>{info.foodName}</Text>
         </View>
         <View

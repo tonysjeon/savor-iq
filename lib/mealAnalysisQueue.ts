@@ -10,6 +10,7 @@ import {
   isFoodNotDetectedError,
 } from '@/lib/gemini';
 import { prepareMealPhotos } from '@/lib/mealPhoto';
+import { t } from '@/lib/i18n';
 import { prependCachedAnalysis } from '@/lib/userHistoryCache';
 
 export type MealAnalysisJobStatus = 'processing' | 'ready' | 'error';
@@ -193,7 +194,7 @@ async function runJob(id: string): Promise<void> {
       const current = jobs.get(id);
       if (!current) return;
       const message =
-        saveErr instanceof Error ? saveErr.message : 'Could not save meal.';
+        saveErr instanceof Error ? saveErr.message : t('processing.couldNotSave');
       // Keep the analysis result visible, but do not silently hide a cloud
       // persistence failure behind an otherwise successful card.
       if (current.status === 'ready' && current.result) {
@@ -218,10 +219,10 @@ async function runJob(id: string): Promise<void> {
       ...current,
       status: 'error',
       error: foodNotDetected
-        ? 'No Food Detected'
+        ? t('processing.noFood')
         : err instanceof Error
           ? err.message
-          : 'Analysis failed.',
+          : t('processing.analysisFailed'),
       errorKind: foodNotDetected ? 'food_not_detected' : 'generic',
       result: undefined,
     });

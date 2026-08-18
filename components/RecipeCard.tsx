@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image, StyleSheet, Text, View } from 'react-native';
 
 import { colors } from '@/constants/theme';
+import { useLanguage } from '@/context/LanguageContext';
 import type { Recipe } from '@/types/recipe';
 
 type RecipeCardProps = {
@@ -9,6 +10,7 @@ type RecipeCardProps = {
 };
 
 export function RecipeCard({ recipe }: RecipeCardProps) {
+  const { t } = useLanguage();
   return (
     <View style={styles.card}>
       {recipe.imageUrl ? (
@@ -31,18 +33,18 @@ export function RecipeCard({ recipe }: RecipeCardProps) {
             <Text style={styles.metaText}>{recipe.preparationMethod}</Text>
           </View>
           <View style={styles.metaChip}>
-            <Text style={styles.metaText}>Serves {recipe.servings}</Text>
+            <Text style={styles.metaText}>{t('recipe.serves', { count: recipe.servings })}</Text>
           </View>
         </View>
 
-        <Text style={styles.sectionLabel}>Ingredients</Text>
+        <Text style={styles.sectionLabel}>{t('recipe.ingredients')}</Text>
         {recipe.ingredients.map((ingredient, index) => (
           <Text key={`${index}-${ingredient}`} style={styles.listItem}>
             • {ingredient}
           </Text>
         ))}
 
-        <Text style={styles.sectionLabel}>Instructions</Text>
+        <Text style={styles.sectionLabel}>{t('recipe.instructions')}</Text>
         {recipe.steps.map((step, index) => (
           <View key={`${index}-${step.slice(0, 24)}`} style={styles.stepRow}>
             <View style={styles.stepBadge}>
@@ -52,7 +54,7 @@ export function RecipeCard({ recipe }: RecipeCardProps) {
           </View>
         ))}
 
-        <Text style={styles.sectionLabel}>Nutrition</Text>
+        <Text style={styles.sectionLabel}>{t('recipe.nutrition')}</Text>
         <Text style={styles.nutrition}>{recipe.nutrition}</Text>
       </View>
     </View>

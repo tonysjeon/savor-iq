@@ -3,6 +3,7 @@ import { Image, Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-
 
 import { AvocadoIcon } from '@/components/AvocadoIcon';
 import { colors } from '@/constants/theme';
+import { useLanguage } from '@/context/LanguageContext';
 import type { SavedNutrition } from '@/lib/firestore';
 
 type MealHistoryCardProps = {
@@ -11,23 +12,24 @@ type MealHistoryCardProps = {
   style?: ViewStyle;
 };
 
-function formatMealTime(createdAt: number | null): string {
+function formatMealTime(createdAt: number | null, locale: string): string {
   if (createdAt == null) return '';
-  return new Date(createdAt).toLocaleTimeString(undefined, {
+  return new Date(createdAt).toLocaleTimeString(locale, {
     hour: 'numeric',
     minute: '2-digit',
   });
 }
 
 export function MealHistoryCard({ item, onPress, style }: MealHistoryCardProps) {
-  const timeLabel = formatMealTime(item.createdAt);
+  const { t, locale } = useLanguage();
+  const timeLabel = formatMealTime(item.createdAt, locale);
 
   return (
     <Pressable
       style={[styles.card, style]}
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`Open nutrition for ${item.foodName}`}
+      accessibilityLabel={t('meal.openNutrition', { name: item.foodName })}
     >
       {item.imageUrl ? (
         <Image source={{ uri: item.imageUrl }} style={styles.thumb} />
@@ -45,7 +47,7 @@ export function MealHistoryCard({ item, onPress, style }: MealHistoryCardProps) 
         </View>
         <View style={styles.calorieRow}>
           <Ionicons name="flame" size={18} color={colors.text} />
-          <Text style={styles.calories}>{Math.round(item.calories)} calories</Text>
+          <Text style={styles.calories}>{t('meal.calories', { count: Math.round(item.calories) })}</Text>
         </View>
         <View style={styles.macroRow}>
           <View style={styles.macro}>
