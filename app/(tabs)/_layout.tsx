@@ -34,7 +34,7 @@ export default function TabsLayout() {
       />
       <Tabs.Screen name="chat" options={{ title: 'Chat' }} />
       <Tabs.Screen name="calendar" options={{ title: 'Calendar' }} />
-      <Tabs.Screen name="profile" options={{ title: 'Profile' }} />
+      <Tabs.Screen name="profile" options={{ title: 'Progress' }} />
     </Tabs>
   );
 }

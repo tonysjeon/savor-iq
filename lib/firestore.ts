@@ -34,6 +34,14 @@ export type SavedNutrition = NutritionInfo & {
   createdAt: number | null;
 };
 
+export type SavedUserProfile = {
+  name: string;
+  email: string;
+  onboarding?: OnboardingProfile;
+  recommendation?: NutritionRecommendation;
+  onboardingCompletedAt?: number | null;
+};
+
 export type SaveNutritionOptions = {
   imageBase64?: string;
   localImageUri?: string;
@@ -172,6 +180,32 @@ export async function saveUserProfile(params: {
     },
     { merge: true },
   );
+}
+
+export async function getUserProfile(uid: string): Promise<SavedUserProfile | null> {
+  const firestore = requireDb();
+  const snapshot = await getDoc(doc(firestore, 'users', uid));
+  if (!snapshot.exists()) return null;
+
+  const data = snapshot.data() as Record<string, unknown>;
+  return {
+    name: typeof data.name === 'string' ? data.name : '',
+    email: typeof data.email === 'string' ? data.email : '',
+    onboarding:
+      data.onboarding && typeof data.onboarding === 'object'
+        ? (data.onboarding as OnboardingProfile)
+        : undefined,
+    recommendation:
+      data.nutritionRecommendation && typeof data.nutritionRecommendation === 'object'
+        ? (data.nutritionRecommendation as NutritionRecommendation)
+        : undefined,
+    onboardingCompletedAt: toMillis(data.onboardingCompletedAt),
+  };
+}
+
+export async function deleteUserProfile(uid: string): Promise<void> {
+  const firestore = requireDb();
+  await deleteDoc(doc(firestore, 'users', uid));
 }
 
 export async function saveRecipe(uid: string, recipe: Recipe): Promise<string> {
