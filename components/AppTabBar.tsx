@@ -17,14 +17,13 @@ const ICONS: Record<
   index: { outline: 'home-outline', filled: 'home' },
   chat: { outline: 'chatbubble-ellipses-outline', filled: 'chatbubble-ellipses' },
   calendar: { outline: 'calendar-outline', filled: 'calendar' },
-  profile: { outline: 'person-outline', filled: 'person' },
 };
 
 const LABELS: Record<string, string> = {
   index: 'Home',
   chat: 'Chat',
   calendar: 'Calendar',
-  profile: 'Profile',
+  profile: 'Progress',
 };
 
 function TabItem({
@@ -57,7 +56,26 @@ function TabItem({
         pressed && styles.tabPressed,
       ]}
     >
-      <Ionicons name={icon} size={22} color={color} />
+      {routeName === 'profile' ? (
+        <View style={styles.progressIcon} accessibilityLabel="Progress chart">
+          {[8, 13, 18].map((height) => (
+            <View
+              key={height}
+              style={[
+                styles.progressBar,
+                {
+                  height,
+                  backgroundColor: focused ? color : 'transparent',
+                  borderColor: color,
+                  borderWidth: focused ? 0 : 1.5,
+                },
+              ]}
+            />
+          ))}
+        </View>
+      ) : (
+        <Ionicons name={icon} size={22} color={color} />
+      )}
       <Text style={[styles.label, { color }]}>{LABELS[routeName] ?? routeName}</Text>
     </Pressable>
   );
@@ -175,6 +193,16 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 10,
     fontWeight: '600',
+  },
+  progressIcon: {
+    height: 22,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 2,
+  },
+  progressBar: {
+    width: 6,
+    borderRadius: 2,
   },
   plusWrap: {
     alignItems: 'center',

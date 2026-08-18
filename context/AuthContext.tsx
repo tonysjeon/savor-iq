@@ -2,6 +2,7 @@ import {
   GoogleAuthProvider,
   User,
   createUserWithEmailAndPassword,
+  deleteUser,
   getAdditionalUserInfo,
   onAuthStateChanged,
   signInWithCredential,
@@ -20,7 +21,12 @@ import {
 } from 'react';
 
 import { auth, isFirebaseConfigured } from '@/lib/firebase';
-import { saveUserProfile } from '@/lib/firestore';
+import {
+  deleteUserProfile,
+  getUserProfile,
+  saveUserProfile,
+  type SavedUserProfile,
+} from '@/lib/firestore';
 import {
   calculateRecommendation,
   clearOnboardingDraft,
@@ -29,18 +35,21 @@ import {
 
 type AuthContextValue = {
   user: User | null;
+  profile: SavedUserProfile | null;
   loading: boolean;
   configured: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signInWithGoogle: (idToken: string) => Promise<void>;
   signUp: (name: string, email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  deleteAccount: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<SavedUserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -49,8 +58,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    return onAuthStateChanged(auth, (nextUser) => {
+    return onAuthStateChanged(auth, async (nextUser) => {
       setUser(nextUser);
+      if (!nextUser) {
+        setProfile(null);
+        setLoading(false);
+        return;
+      }
+      try {
+        const savedProfile = await getUserProfile(nextUser.uid);
+        if (savedProfile) {
+          setProfile(savedProfile);
+        } else {
+          const onboarding = await getOnboardingDraft();
+          setProfile(
+            onboarding
+              ? {
+                  name: nextUser.displayName ?? '',
+                  email: nextUser.email ?? '',
+                  onboarding,
+                  recommendation: calculateRecommendation(onboarding),
+                }
+              : null,
+          );
+        }
+      } catch {
+        setProfile(null);
+      }
       setLoading(false);
     });
   }, []);
@@ -73,12 +107,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     try {
       const onboarding = await getOnboardingDraft();
+      const recommendation = onboarding ? calculateRecommendation(onboarding) : undefined;
       await saveUserProfile({
         uid: credential.user.uid,
         name: displayName,
         email: email.trim(),
         onboarding: onboarding ?? undefined,
-        recommendation: onboarding ? calculateRecommendation(onboarding) : undefined,
+        recommendation,
+      });
+      setProfile({
+        name: displayName,
+        email: email.trim(),
+        onboarding: onboarding ?? undefined,
+        recommendation,
       });
       if (onboarding) await clearOnboardingDraft();
     } catch {
@@ -100,12 +141,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     try {
       const onboarding = await getOnboardingDraft();
+      const recommendation = onboarding ? calculateRecommendation(onboarding) : undefined;
       await saveUserProfile({
         uid: credential.user.uid,
         name: credential.user.displayName ?? '',
         email: credential.user.email ?? '',
         onboarding: onboarding ?? undefined,
-        recommendation: onboarding ? calculateRecommendation(onboarding) : undefined,
+        recommendation,
+      });
+      setProfile({
+        name: credential.user.displayName ?? '',
+        email: credential.user.email ?? '',
+        onboarding: onboarding ?? undefined,
+        recommendation,
       });
       if (onboarding) await clearOnboardingDraft();
     } catch {
@@ -118,17 +166,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await firebaseSignOut(auth);
   }, []);
 
+  const deleteAccount = useCallback(async () => {
+    if (!auth?.currentUser) return;
+    const currentUser = auth.currentUser;
+    await deleteUserProfile(currentUser.uid);
+    await deleteUser(currentUser);
+  }, []);
+
   const value = useMemo(
     () => ({
       user,
+      profile,
       loading,
       configured: isFirebaseConfigured,
       signIn,
       signInWithGoogle,
       signUp,
       signOut,
+      deleteAccount,
     }),
-    [user, loading, signIn, signInWithGoogle, signUp, signOut],
+    [user, profile, loading, signIn, signInWithGoogle, signUp, signOut, deleteAccount],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

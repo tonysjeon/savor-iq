@@ -15,6 +15,7 @@ import { router, type Href } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AvocadoIcon } from '@/components/AvocadoIcon';
+import { PageHeader } from '@/components/PageHeader';
 import { AnimatedNumber } from '@/components/AnimatedNumber';
 import { ProgressRing } from '@/components/ProgressRing';
 import { MealProcessingCard } from '@/components/MealProcessingCard';
@@ -287,12 +288,7 @@ export default function HomeScreen() {
       contentContainerStyle={[styles.content, { paddingTop: insets.top + 8 }]}
       showsVerticalScrollIndicator={false}
     >
-      <View style={styles.header}>
-        <View style={styles.brandRow}>
-          <Ionicons name="restaurant" size={28} color={colors.text} />
-          <Text style={styles.brand}>SavorIQ</Text>
-        </View>
-      </View>
+      <PageHeader title="SavorIQ" showIcon />
 
       <View style={styles.weekRow}>
         {days.map((day) => {

@@ -19,6 +19,7 @@ import { AvocadoIcon } from '@/components/AvocadoIcon';
 import { ProgressRing } from '@/components/ProgressRing';
 import { useAuth } from '@/context/AuthContext';
 import { colors } from '@/constants/theme';
+import { PageHeader } from '@/components/PageHeader';
 import {
   listNutritionAnalyses,
   type SavedNutrition,
@@ -267,8 +268,9 @@ export default function CalendarScreen() {
   return (
     <ScrollView
       style={styles.flex}
-      contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + 8 }]}
     >
+      <PageHeader title="Calendar" />
       <View style={styles.calendarCard}>
       <View style={styles.monthHeader}>
         <Pressable
