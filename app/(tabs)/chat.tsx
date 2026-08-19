@@ -1,55 +1,66 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Animated,
+  Easing,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
+  type ViewStyle,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { MealPlanCard } from '@/components/MealPlanCard';
+import { MealSuggestionCard } from '@/components/MealSuggestionCard';
+import { PageHeader } from '@/components/PageHeader';
 import { RecipeCard } from '@/components/RecipeCard';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { colors } from '@/constants/theme';
-import { saveRecipe } from '@/lib/firestore';
-import { generateMealPlan, generateRecipe, isGeminiConfigured } from '@/lib/gemini';
-import { exportMealPlanPdf } from '@/lib/mealPlanPdf';
 import {
-  PLANNER_QUESTIONS,
-  type MealPlan,
-} from '@/types/mealPlan';
+  listNutritionAnalyses,
+  saveRecipe,
+  type SavedNutrition,
+} from '@/lib/firestore';
+import {
+  generateMealSuggestions,
+  generateRecipe,
+  isGeminiConfigured,
+} from '@/lib/gemini';
+import {
+  buildMealSuggestionContext,
+  mealSlotFromDate,
+  mealSlotMessageKey,
+} from '@/lib/mealSuggestion';
+import {
+  dedupeAnalyses,
+  getHistoryCacheSync,
+  loadHistoryCache,
+  subscribeHistoryCache,
+} from '@/lib/userHistoryCache';
 import type { MessageKey } from '@/lib/i18n';
+import type { MealSlot, MealSuggestion } from '@/types/mealSuggestion';
 import {
+  CUISINE_OPTIONS,
   DIET_OPTIONS,
-  INGREDIENT_PRESETS,
-  PREPARATION_METHODS,
-  SERVING_OPTIONS,
-  type DietOption,
-  type PreparationMethod,
   type Recipe,
-  type ServingOption,
 } from '@/types/recipe';
 
-const MODE_OPTIONS = ['Meal plan', 'Recipe'] as const;
-const PLANNER_KEYS = [
-  'planner.skill',
-  'planner.time',
-  'planner.allergies',
-  'planner.goal',
-  'planner.people',
-  'planner.seasonal',
-  'planner.prep',
-  'planner.budget',
-  'planner.cuisine',
-  'planner.snacks',
-] as const satisfies readonly MessageKey[];
-const SERVING_LABELS = SERVING_OPTIONS.map(String);
-const CHAT_GUTTER = 16;
+const YES_RECIPE_OPTION = 'Yes, a full recipe';
+const NO_RECIPE_OPTION = 'No thanks';
+const RECIPE_FOLLOW_UP = [YES_RECIPE_OPTION, NO_RECIPE_OPTION] as const;
+const GOAL_KEYS = {
+  lose: 'goal.lose',
+  maintain: 'goal.maintain',
+  gain: 'goal.gain',
+} as const satisfies Record<string, MessageKey>;
+const CHAT_GUTTER = 20;
+const TAB_BAR_HEIGHT = 78;
+const USER_BUBBLE_BG = '#E6E6E6';
+const MEAL_SLOTS: readonly MealSlot[] = ['breakfast', 'lunch', 'dinner'];
 
 type TextMessage = {
   id: string;
@@ -60,11 +71,14 @@ type TextMessage = {
   answered?: boolean;
 };
 
-type PlanMessage = {
+type SuggestionMessage = {
   id: string;
   role: 'assistant';
-  kind: 'plan';
-  plan: MealPlan;
+  kind: 'suggestion';
+  suggestion: MealSuggestion;
+  caloriesLeftAfter: number;
+  selectable?: boolean;
+  selected?: boolean;
 };
 
 type RecipeMessage = {
@@ -74,16 +88,13 @@ type RecipeMessage = {
   recipe: Recipe;
 };
 
-type ChatMessage = TextMessage | PlanMessage | RecipeMessage;
+type ChatMessage = TextMessage | SuggestionMessage | RecipeMessage;
 
 type PendingPrompt =
-  | { type: 'mode' }
-  | { type: 'plan-diet' }
-  | { type: 'plan-question'; index: number }
-  | { type: 'recipe-diet' }
-  | { type: 'recipe-method' }
-  | { type: 'recipe-servings' }
-  | { type: 'recipe-ingredient' }
+  | { type: 'suggestion-diet' }
+  | { type: 'suggestion-cuisine' }
+  | { type: 'pick-suggestion' }
+  | { type: 'want-recipe' }
   | { type: 'none' };
 
 let messageSeq = 0;
@@ -124,9 +135,7 @@ function markPromptAnswered(messages: ChatMessage[]): ChatMessage[] {
 }
 
 function openingMessages(greeting: string): ChatMessage[] {
-  return [
-    assistantText(greeting, MODE_OPTIONS),
-  ];
+  return [assistantText(greeting, DIET_OPTIONS)];
 }
 
 function StreamingText({
@@ -151,7 +160,7 @@ function StreamingText({
 
     let index = 0;
     const timer = setInterval(() => {
-      index += 1;
+      index = Math.min(text.length, index + 2);
       setShown(text.slice(0, index));
       if (index >= text.length) {
         clearInterval(timer);
@@ -168,7 +177,243 @@ function StreamingText({
   return <Text style={styles.bubbleText}>{shown}</Text>;
 }
 
-function OptionsCarousel({
+function FadeInBlock({
+  children,
+  style,
+}: {
+  children: React.ReactNode;
+  style?: ViewStyle;
+}) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(12)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 320,
+        useNativeDriver: true,
+      }),
+      Animated.timing(translateY, {
+        toValue: 0,
+        duration: 320,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [opacity, translateY]);
+
+  return (
+    <Animated.View style={[style, { opacity, transform: [{ translateY }] }]}>
+      {children}
+    </Animated.View>
+  );
+}
+
+function MealSlotPicker({
+  value,
+  onChange,
+  labelFor,
+}: {
+  value: MealSlot;
+  onChange: (slot: MealSlot) => void;
+  labelFor: (slot: MealSlot) => string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [anchor, setAnchor] = useState({ x: 20, y: 80, width: 120, height: 32 });
+  const pillRef = useRef<View>(null);
+
+  function openMenu() {
+    pillRef.current?.measureInWindow((x, y, width, height) => {
+      setAnchor({ x, y, width, height });
+      setOpen(true);
+    });
+  }
+
+  return (
+    <>
+      <Pressable
+        ref={pillRef}
+        style={[styles.contextPill, styles.contextPillPrimary]}
+        onPress={openMenu}
+        accessibilityRole="button"
+        accessibilityLabel={labelFor(value)}
+      >
+        <Ionicons
+          name="time-outline"
+          size={14}
+          color={colors.buttonPrimaryText}
+        />
+        <Text
+          style={[styles.contextText, styles.contextTextPrimary]}
+          numberOfLines={1}
+        >
+          {labelFor(value)}
+        </Text>
+        <Ionicons
+          name="chevron-down"
+          size={12}
+          color={colors.buttonPrimaryText}
+        />
+      </Pressable>
+      <Modal
+        visible={open}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setOpen(false)}
+      >
+        <View style={styles.slotMenuRoot}>
+          <Pressable style={styles.slotMenuBackdrop} onPress={() => setOpen(false)} />
+          <View
+            style={[
+              styles.slotMenu,
+              { top: anchor.y + anchor.height + 6, left: anchor.x },
+            ]}
+          >
+            {MEAL_SLOTS.map((slot) => {
+              const selected = slot === value;
+              return (
+                <Pressable
+                  key={slot}
+                  style={[
+                    styles.slotMenuItem,
+                    selected && styles.slotMenuItemSelected,
+                  ]}
+                  onPress={() => {
+                    setOpen(false);
+                    if (!selected) onChange(slot);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.slotMenuItemText,
+                      selected && styles.slotMenuItemTextSelected,
+                    ]}
+                  >
+                    {labelFor(slot)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      </Modal>
+    </>
+  );
+}
+
+function FadeChip({
+  delay,
+  children,
+}: {
+  delay: number;
+  children: React.ReactNode;
+}) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(10)).current;
+
+  useEffect(() => {
+    const animation = Animated.parallel([
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 340,
+        delay,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(translateY, {
+        toValue: 0,
+        duration: 340,
+        delay,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]);
+    animation.start();
+    return () => animation.stop();
+  }, [delay, opacity, translateY]);
+
+  return (
+    <Animated.View style={{ opacity, transform: [{ translateY }] }}>
+      {children}
+    </Animated.View>
+  );
+}
+
+function ThinkingPulse() {
+  const pulse = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 820,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0,
+          duration: 820,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse]);
+
+  return (
+    <View style={styles.thinkingPulseWrap}>
+      <Animated.View
+        style={[
+          styles.thinkingPulseDot,
+          {
+            transform: [
+              {
+                scale: pulse.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0.62, 1],
+                }),
+              },
+            ],
+          },
+        ]}
+      />
+    </View>
+  );
+}
+
+function thinkingBase(text: string) {
+  return text.replace(/[.…]+$/u, '').trimEnd();
+}
+
+function ThinkingStatus({ label }: { label: string }) {
+  const [dotCount, setDotCount] = useState(0);
+
+  useEffect(() => {
+    setDotCount(0);
+    const timer = setInterval(() => {
+      setDotCount((count) => (count + 1) % 4);
+    }, 280);
+    return () => clearInterval(timer);
+  }, [label]);
+
+  return (
+    <View style={styles.bubbleRow}>
+      <View style={[styles.bubble, styles.assistantBubble, styles.typing]}>
+        <ThinkingPulse />
+        <Text style={styles.typingText}>
+          {thinkingBase(label)}
+          {'.'.repeat(dotCount)}
+          <Text style={styles.typingDotsSpacer}>{'.'.repeat(3 - dotCount)}</Text>
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function DietFilterList({
   options,
   onSelect,
   labelFor,
@@ -176,6 +421,33 @@ function OptionsCarousel({
   options: readonly string[];
   onSelect: (option: string) => void;
   labelFor: (option: string) => string;
+}) {
+  return (
+    <View style={styles.dietList}>
+      {options.map((option, index) => (
+        <FadeChip key={option} delay={index * 28}>
+          <Pressable
+            style={styles.dietChip}
+            onPress={() => onSelect(option)}
+          >
+            <Text style={styles.optionChipText}>{labelFor(option)}</Text>
+          </Pressable>
+        </FadeChip>
+      ))}
+    </View>
+  );
+}
+
+function OptionsCarousel({
+  options,
+  onSelect,
+  labelFor,
+  primaryOption,
+}: {
+  options: readonly string[];
+  onSelect: (option: string) => void;
+  labelFor: (option: string) => string;
+  primaryOption?: string;
 }) {
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(8)).current;
@@ -210,99 +482,222 @@ function OptionsCarousel({
         style={styles.optionsCarousel}
         contentContainerStyle={styles.optionsRow}
       >
-        {options.map((option) => (
-          <Pressable
-            key={option}
-            style={styles.optionChip}
-            onPress={() => onSelect(option)}
-          >
-            <Text style={styles.optionChipText}>{labelFor(option)}</Text>
-          </Pressable>
-        ))}
+        {options.map((option) => {
+          const isPrimary = option === primaryOption;
+          return (
+            <Pressable
+              key={option}
+              style={[styles.optionChip, isPrimary && styles.optionChipPrimary]}
+              onPress={() => onSelect(option)}
+            >
+              {isPrimary ? (
+                <Ionicons
+                  name={
+                    option === YES_RECIPE_OPTION ? 'book-outline' : 'restaurant'
+                  }
+                  size={15}
+                  color={colors.buttonPrimaryText}
+                />
+              ) : null}
+              <Text
+                style={[
+                  styles.optionChipText,
+                  isPrimary && styles.optionChipTextPrimary,
+                ]}
+              >
+                {labelFor(option)}
+              </Text>
+            </Pressable>
+          );
+        })}
       </ScrollView>
     </Animated.View>
   );
 }
 
 export default function ChatScreen() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { t, to, language, locale } = useLanguage();
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
-  const startDays = useMemo(() => {
-    return Array.from({ length: 7 }, (_, offset) => {
-      const day = new Date();
-      day.setDate(day.getDate() + offset);
-      return day.toLocaleDateString(locale, { weekday: 'long' });
-    });
-  }, [locale]);
-  const todayName = startDays[0];
+  const stickToBottomRef = useRef(false);
+  const scrollYRef = useRef(0);
 
-  const [messages, setMessages] = useState<ChatMessage[]>(() =>
-    openingMessages(t('chat.hi')),
-  );
-  const [pending, setPending] = useState<PendingPrompt>({ type: 'mode' });
-  const [mode, setMode] = useState<'plan' | 'recipe' | null>(null);
-  const [diet, setDiet] = useState<DietOption | null>(null);
-  const [answers, setAnswers] = useState<{ question: string; answer: string }[]>(
-    [],
-  );
-  const [recipeDiet, setRecipeDiet] = useState<DietOption>('None');
-  const [recipeMethod, setRecipeMethod] =
-    useState<PreparationMethod>('Any Method');
-  const [recipeServings, setRecipeServings] = useState<ServingOption>(2);
-  const [mealPlan, setMealPlan] = useState<MealPlan | null>(null);
+  function scrollChatToBottom(animated = true) {
+    scrollRef.current?.scrollToEnd({ animated });
+  }
+
+  function nudgeScrollDown(distance = 88) {
+    scrollRef.current?.scrollTo({
+      y: scrollYRef.current + distance,
+      animated: true,
+    });
+  }
+
+  const [analyses, setAnalyses] = useState<SavedNutrition[]>([]);
+  const [pending, setPending] = useState<PendingPrompt>({
+    type: 'suggestion-diet',
+  });
+  const [suggestionDiet, setSuggestionDiet] = useState('None');
+  const [suggestionCuisine, setSuggestionCuisine] = useState('Any');
+  const [suggestedTitles, setSuggestedTitles] = useState<string[]>([]);
+  const [pickedSuggestion, setPickedSuggestion] =
+    useState<MealSuggestion | null>(null);
+  const [confirmingTitle, setConfirmingTitle] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
-  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [streamReadyIds, setStreamReadyIds] = useState<Record<string, true>>(
     {},
   );
+  const [mealSlot, setMealSlot] = useState<MealSlot>(() => mealSlotFromDate());
 
-  const markStreamReady = useRef((id: string) => {
+  function greetingForSlot(slot: MealSlot) {
+    const meal = t(mealSlotMessageKey(slot)).toLocaleLowerCase(locale);
+    return t('chat.greeting', { meal });
+  }
+
+  const dayContext = useMemo(
+    () =>
+      buildMealSuggestionContext({
+        profile,
+        analyses,
+        dietFilter: suggestionDiet,
+        cuisineFilter: suggestionCuisine,
+        mealSlot,
+      }),
+    [profile, analyses, suggestionDiet, suggestionCuisine, mealSlot],
+  );
+
+  const queuedSuggestionsRef = useRef<{
+    afterId: string;
+    messages: SuggestionMessage[];
+  } | null>(null);
+  const queuedRecipeFollowUpRef = useRef<{
+    afterId: string;
+    messages: ChatMessage[];
+  } | null>(null);
+
+  const [messages, setMessages] = useState<ChatMessage[]>(() =>
+    openingMessages(greetingForSlot(mealSlotFromDate())),
+  );
+
+  function markStreamReady(id: string) {
     setStreamReadyIds((current) =>
       current[id] ? current : { ...current, [id]: true },
     );
-  }).current;
+    const queued = queuedSuggestionsRef.current;
+    if (queued && queued.afterId === id) {
+      queuedSuggestionsRef.current = null;
+      setMessages((current) => [...current, ...queued.messages]);
+      setPending({ type: 'pick-suggestion' });
+      return;
+    }
+    const recipeFollowUp = queuedRecipeFollowUpRef.current;
+    if (recipeFollowUp && recipeFollowUp.afterId === id) {
+      queuedRecipeFollowUpRef.current = null;
+      setMessages((current) => [...current, ...recipeFollowUp.messages]);
+      requestAnimationFrame(() => nudgeScrollDown(360));
+      setTimeout(() => nudgeScrollDown(360), 80);
+      setTimeout(() => nudgeScrollDown(360), 220);
+    }
+  }
+
+  const applyCache = useCallback((uid: string) => {
+    const cached = getHistoryCacheSync(uid);
+    if (cached) setAnalyses(dedupeAnalyses(cached.analyses));
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!user) {
+        setAnalyses([]);
+        return;
+      }
+      const uid = user.uid;
+      let active = true;
+
+      async function load() {
+        applyCache(uid);
+        const disk = await loadHistoryCache(uid);
+        if (active && disk) setAnalyses(dedupeAnalyses(disk.analyses));
+        try {
+          const next = await listNutritionAnalyses(uid, 100);
+          if (active) setAnalyses(dedupeAnalyses(next));
+        } catch {
+          // Keep whatever the cache provided.
+        }
+      }
+
+      void load();
+      return () => {
+        active = false;
+      };
+    }, [user, applyCache]),
+  );
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      scrollRef.current?.scrollToEnd({ animated: true });
-    }, 50);
-    return () => clearTimeout(timer);
-  }, [messages, pending, generating]);
+    if (!user) return;
+    const uid = user.uid;
+    return subscribeHistoryCache((changedUid) => {
+      if (changedUid === uid) applyCache(uid);
+    });
+  }, [user, applyCache]);
 
-  async function buildPlan(
-    nextDiet: DietOption,
-    nextAnswers: { question: string; answer: string }[],
-  ) {
+async function buildSuggestions(nextDiet: string, nextCuisine: string) {
     setGenerating(true);
     setPending({ type: 'none' });
     setError(null);
-    setMessages((current) => [
-      ...markPromptAnswered(current),
-      assistantText(t('chat.gotItPlan', { day: todayName })),
-    ]);
+    setPickedSuggestion(null);
+    setConfirmingTitle(null);
+
+    const context = buildMealSuggestionContext({
+      profile,
+      analyses,
+      dietFilter: nextDiet,
+      cuisineFilter: nextCuisine,
+      mealSlot,
+    });
+    const mealLabel = t(mealSlotMessageKey(context.mealSlot)).toLocaleLowerCase(
+      locale,
+    );
+    const isFirstSuggestion = suggestedTitles.length === 0;
+
+    setMessages((current) => markPromptAnswered(current));
 
     try {
-      const preferences = nextAnswers
-        .map((item) => `${item.question}: ${item.answer}`)
-        .join('\n');
-      const plan = await generateMealPlan(preferences, nextDiet, startDays);
-      setMealPlan(plan);
+      const meals = await generateMealSuggestions(context, suggestedTitles);
+      setSuggestedTitles((current) => [
+        ...current,
+        ...meals.map((meal) => meal.title),
+      ]);
+      const intro = assistantText(t('chat.heresPicks', { meal: mealLabel }));
+      queuedSuggestionsRef.current = {
+        afterId: intro.id,
+        messages: meals.map((suggestion) => ({
+          id: nextId('suggestion'),
+          role: 'assistant' as const,
+          kind: 'suggestion' as const,
+          suggestion,
+          caloriesLeftAfter: context.remaining.calories - suggestion.calories,
+          selectable: true,
+          selected: false,
+        })),
+      };
       setMessages((current) => [
         ...current,
-        assistantText(t('chat.heresWeek')),
-        { id: nextId('plan'), role: 'assistant', kind: 'plan', plan },
-        assistantText(t('chat.wantPdf')),
+        ...(isFirstSuggestion && !profile?.recommendation
+          ? [assistantText(t('chat.usingDefaultTargets'))]
+          : []),
+        intro,
       ]);
+      setGenerating(false);
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : t('chat.unablePlan');
+        err instanceof Error ? err.message : t('chat.unableSuggestion');
       setError(message);
       setMessages((current) => [
         ...current,
-        assistantText(t('chat.couldntPlan', { error: message })),
+        assistantText(t('chat.couldntSuggest', { error: message })),
         assistantText(t('chat.tapRestart')),
       ]);
     } finally {
@@ -310,29 +705,68 @@ export default function ChatScreen() {
     }
   }
 
-  async function buildRecipe(ingredient: string) {
+  function onPickSuggestion(suggestion: MealSuggestion) {
+    if (generating || pending.type !== 'pick-suggestion') return;
+
+    setConfirmingTitle(null);
+    setPickedSuggestion(suggestion);
+    setMessages((current) => [
+      ...current.map((message) =>
+        message.kind === 'suggestion' && message.selectable
+          ? {
+              ...message,
+              selectable: false,
+              selected: message.suggestion.title === suggestion.title,
+            }
+          : message,
+      ),
+      userText(suggestion.title),
+      assistantText(t('chat.wantRecipe'), RECIPE_FOLLOW_UP),
+    ]);
+    setPending({ type: 'want-recipe' });
+    stickToBottomRef.current = true;
+    requestAnimationFrame(() => scrollChatToBottom(true));
+    setTimeout(() => scrollChatToBottom(true), 50);
+    setTimeout(() => scrollChatToBottom(true), 200);
+  }
+
+  async function buildRecipeForPick(suggestion: MealSuggestion) {
     setGenerating(true);
     setPending({ type: 'none' });
     setError(null);
-    setMessages((current) => [
-      ...markPromptAnswered(current),
-      userText(ingredient),
-      assistantText(t('chat.cooking')),
-    ]);
+    setMessages((current) => markPromptAnswered(current));
+
+    const context = buildMealSuggestionContext({
+      profile,
+      analyses,
+      dietFilter: suggestionDiet,
+      cuisineFilter: suggestionCuisine,
+      mealSlot,
+    });
 
     try {
       const recipe = await generateRecipe(
-        ingredient,
-        recipeDiet,
-        recipeMethod,
-        recipeServings,
+        suggestion.title,
+        suggestionDiet,
+        'Any Method',
+        1,
+        context,
       );
-      setMessages((current) => [
-        ...current,
-        assistantText(t('chat.heresRecipe')),
-        { id: nextId('recipe'), role: 'assistant', kind: 'recipe', recipe },
-        assistantText(t('chat.tapRestartElse')),
-      ]);
+      const intro = assistantText(t('chat.heresRecipe'));
+      queuedRecipeFollowUpRef.current = {
+        afterId: intro.id,
+        messages: [
+          {
+            id: nextId('recipe'),
+            role: 'assistant' as const,
+            kind: 'recipe' as const,
+            recipe,
+          },
+          assistantText(t('chat.tapRestartElse')),
+        ],
+      };
+      setMessages((current) => [...current, intro]);
+      setGenerating(false);
 
       if (user) {
         try {
@@ -359,133 +793,92 @@ export default function ChatScreen() {
     }
   }
 
+  function sendDiet(value: string) {
+    if (generating || pending.type !== 'suggestion-diet') return;
+    const selected = value.trim() || 'None';
+    setSuggestionDiet(selected);
+    const known = (DIET_OPTIONS as readonly string[]).includes(selected);
+    setMessages((current) => [
+      ...markPromptAnswered(current),
+      userText(known ? to(selected) : selected),
+      assistantText(t('chat.askCuisine'), CUISINE_OPTIONS),
+    ]);
+    setPending({ type: 'suggestion-cuisine' });
+  }
+
+  function sendCuisine(value: string) {
+    if (generating || pending.type !== 'suggestion-cuisine') return;
+    const selected = value.trim() || 'Any';
+    setSuggestionCuisine(selected);
+    const known = (CUISINE_OPTIONS as readonly string[]).includes(selected);
+    setMessages((current) => [
+      ...markPromptAnswered(current),
+      userText(known ? to(selected) : selected),
+    ]);
+    void buildSuggestions(suggestionDiet, selected);
+  }
+
   function onSelectOption(option: string) {
     if (generating || pending.type === 'none') return;
 
-    if (pending.type === 'mode') {
-      if (option === 'Meal plan') {
-        setMode('plan');
-        setMessages((current) => [
-          ...markPromptAnswered(current),
-          userText(to(option)),
-          assistantText(
-            t('chat.dietFilterPlan', { day: todayName }),
-            DIET_OPTIONS,
-          ),
-        ]);
-        setPending({ type: 'plan-diet' });
-        return;
-      }
-
-      setMode('recipe');
-      setMessages((current) => [
-        ...markPromptAnswered(current),
-        userText(to(option)),
-        assistantText(t('chat.dietFilterRecipe'), DIET_OPTIONS),
-      ]);
-      setPending({ type: 'recipe-diet' });
+    if (pending.type === 'suggestion-diet') {
+      sendDiet(option);
       return;
     }
 
-    if (pending.type === 'plan-diet') {
-      const selected = option as DietOption;
-      setDiet(selected);
-      setMessages((current) => [
-        ...markPromptAnswered(current),
-        userText(to(option)),
-        assistantText(
-          t(PLANNER_KEYS[0]),
-          PLANNER_QUESTIONS[0].options,
-        ),
-      ]);
-      setPending({ type: 'plan-question', index: 0 });
+    if (pending.type === 'suggestion-cuisine') {
+      sendCuisine(option);
       return;
     }
 
-    if (pending.type === 'plan-question') {
-      const question = PLANNER_QUESTIONS[pending.index];
-      if (!question) return;
-
-      const nextAnswers = [
-        ...answers,
-        { question: t(PLANNER_KEYS[pending.index]), answer: to(option) },
-      ];
-      setAnswers(nextAnswers);
-
-      const nextIndex = pending.index + 1;
-      if (nextIndex < PLANNER_QUESTIONS.length) {
-        const nextQuestion = PLANNER_QUESTIONS[nextIndex];
+    if (pending.type === 'want-recipe') {
+      stickToBottomRef.current = false;
+      if (option === YES_RECIPE_OPTION && pickedSuggestion) {
         setMessages((current) => [
           ...markPromptAnswered(current),
           userText(to(option)),
-          assistantText(t(PLANNER_KEYS[nextIndex]), nextQuestion.options),
         ]);
-        setPending({ type: 'plan-question', index: nextIndex });
+        void buildRecipeForPick(pickedSuggestion);
+        requestAnimationFrame(() => nudgeScrollDown());
+        setTimeout(() => nudgeScrollDown(), 80);
         return;
       }
 
       setMessages((current) => [
         ...markPromptAnswered(current),
         userText(to(option)),
+        assistantText(t('chat.noRecipeReply')),
       ]);
-      void buildPlan(diet ?? 'None', nextAnswers);
-      return;
-    }
-
-    if (pending.type === 'recipe-diet') {
-      setRecipeDiet(option as DietOption);
-      setMessages((current) => [
-        ...markPromptAnswered(current),
-        userText(to(option)),
-        assistantText(t('chat.howPrepared'), PREPARATION_METHODS),
-      ]);
-      setPending({ type: 'recipe-method' });
-      return;
-    }
-
-    if (pending.type === 'recipe-method') {
-      setRecipeMethod(option as PreparationMethod);
-      setMessages((current) => [
-        ...markPromptAnswered(current),
-        userText(to(option)),
-        assistantText(t('chat.howServings'), SERVING_LABELS),
-      ]);
-      setPending({ type: 'recipe-servings' });
-      return;
-    }
-
-    if (pending.type === 'recipe-servings') {
-      const servings = Number(option) as ServingOption;
-      setRecipeServings(servings);
-      setMessages((current) => [
-        ...markPromptAnswered(current),
-        userText(to(option)),
-        assistantText(t('chat.pickIngredient'), INGREDIENT_PRESETS),
-      ]);
-      setPending({ type: 'recipe-ingredient' });
-      return;
-    }
-
-    if (pending.type === 'recipe-ingredient') {
-      void buildRecipe(option);
+      setPending({ type: 'none' });
+      requestAnimationFrame(() => nudgeScrollDown());
+      setTimeout(() => nudgeScrollDown(), 80);
     }
   }
 
-  function onRestart() {
+  function resetChat(slot: MealSlot = mealSlot) {
     messageSeq = 0;
-    setMessages(openingMessages(t('chat.hi')));
-    setPending({ type: 'mode' });
-    setMode(null);
-    setDiet(null);
-    setAnswers([]);
-    setRecipeDiet('None');
-    setRecipeMethod('Any Method');
-    setRecipeServings(2);
-    setMealPlan(null);
+    setMealSlot(slot);
+    setMessages(openingMessages(greetingForSlot(slot)));
+    setPending({ type: 'suggestion-diet' });
+    setSuggestionDiet('None');
+    setSuggestionCuisine('Any');
+    setSuggestedTitles([]);
+    setPickedSuggestion(null);
+    setConfirmingTitle(null);
     setGenerating(false);
-    setExporting(false);
     setError(null);
     setStreamReadyIds({});
+    queuedSuggestionsRef.current = null;
+    queuedRecipeFollowUpRef.current = null;
+    stickToBottomRef.current = false;
+  }
+
+  function onRestart() {
+    resetChat();
+  }
+
+  function onChangeMealSlot(slot: MealSlot) {
+    resetChat(slot);
   }
 
   const didApplyLanguage = useRef(false);
@@ -499,84 +892,117 @@ export default function ChatScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [language]);
 
-  async function onExportPdf() {
-    if (!mealPlan || !diet) return;
-    setError(null);
-    setExporting(true);
-    try {
-      await exportMealPlanPdf({
-        plan: mealPlan,
-        diet,
-        answers: [
-          { question: t('chat.dietaryFilter'), answer: to(diet) },
-          ...answers,
-        ],
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('chat.unableExport'));
-    } finally {
-      setExporting(false);
-    }
-  }
+  const thinkingLabel =
+    pending.type === 'none' && pickedSuggestion
+      ? t('chat.cooking')
+      : t('chat.thinking');
 
-  const typingLabel =
-    mode === 'recipe' ? t('chat.draftingRecipe') : t('chat.draftingPlan');
+  const tabClearance = TAB_BAR_HEIGHT + Math.max(insets.bottom, 12);
 
   return (
-    <View style={[styles.flex, { paddingTop: insets.top }]}>
-      <View style={styles.toolbar}>
-        {mealPlan ? (
+    <ScrollView
+      ref={scrollRef}
+      style={styles.flex}
+      contentContainerStyle={[
+        styles.pageContent,
+        {
+          paddingTop: insets.top + 8,
+          paddingBottom: tabClearance + 16,
+        },
+      ]}
+      keyboardShouldPersistTaps="handled"
+      scrollEventThrottle={16}
+      onScroll={(event) => {
+        scrollYRef.current = event.nativeEvent.contentOffset.y;
+      }}
+      onContentSizeChange={() => {
+        if (stickToBottomRef.current) {
+          scrollChatToBottom(true);
+        }
+      }}
+    >
+      <PageHeader
+        title={t('chat.title')}
+        trailing={
           <Pressable
-            style={[styles.headerButton, exporting && styles.buttonDisabled]}
-            disabled={exporting}
-            onPress={onExportPdf}
-            accessibilityLabel={t('chat.exportPdf')}
+            style={[styles.newChatButton, generating && styles.buttonDisabled]}
+            disabled={generating}
+            onPress={onRestart}
+            accessibilityRole="button"
+            accessibilityLabel={t('chat.newChat')}
           >
-            {exporting ? (
-              <ActivityIndicator color={colors.text} />
-            ) : (
-              <Text style={styles.headerButtonText}>{t('chat.exportPdf')}</Text>
-            )}
+            <Ionicons name="add" size={18} color={colors.text} />
+            <Text style={styles.newChatButtonText}>{t('chat.newChat')}</Text>
           </Pressable>
-        ) : (
-          <View style={styles.toolbarSpacer} />
-        )}
-        <Pressable
-          style={[styles.plusButton, generating && styles.buttonDisabled]}
-          disabled={generating}
-          onPress={onRestart}
-          accessibilityLabel={t('chat.newChat')}
-        >
-          <Ionicons name="add" size={22} color={colors.text} />
-        </Pressable>
+        }
+      />
+
+      <View style={styles.contextRow}>
+        <MealSlotPicker
+          value={mealSlot}
+          onChange={onChangeMealSlot}
+          labelFor={(slot) => t(mealSlotMessageKey(slot))}
+        />
+        <View style={[styles.contextPill, styles.contextPillEnd]}>
+          <Ionicons name="flame" size={14} color={colors.text} />
+          <Text style={styles.contextText} numberOfLines={1}>
+            {t('suggestion.caloriesLeft', {
+              calories: dayContext.remaining.calories,
+            })}
+          </Text>
+        </View>
+        <View style={[styles.contextPill, styles.contextPillEnd]}>
+          <Ionicons name="trending-up-outline" size={14} color={colors.text} />
+          <Text style={styles.contextText} numberOfLines={1}>
+            {t(GOAL_KEYS[dayContext.goal])}
+          </Text>
+        </View>
       </View>
 
       {!isGeminiConfigured ? (
-        <Text style={styles.notice}>
-          {t('chat.geminiMissing')}
-        </Text>
+        <Text style={styles.notice}>{t('chat.geminiMissing')}</Text>
       ) : null}
 
-      <ScrollView
-        ref={scrollRef}
-        style={styles.flex}
-        contentContainerStyle={styles.chatContent}
-        keyboardShouldPersistTaps="handled"
-      >
+      <View style={styles.chatContent}>
         {messages.map((message) => {
-          if (message.kind === 'plan') {
+          if (message.kind === 'suggestion') {
+            const canPick = pending.type === 'pick-suggestion';
             return (
-              <View key={message.id} style={styles.assistantBlock}>
-                <MealPlanCard plan={message.plan} />
-              </View>
+              <FadeInBlock key={message.id} style={styles.assistantBlock}>
+                <MealSuggestionCard
+                  suggestion={message.suggestion}
+                  caloriesLeftAfter={message.caloriesLeftAfter}
+                  selectable={canPick && !!message.selectable}
+                  selected={!!message.selected}
+                  confirming={
+                    canPick && confirmingTitle === message.suggestion.title
+                  }
+                  dimmed={
+                    (!canPick &&
+                      !message.selected &&
+                      message.selectable === false) ||
+                    (canPick &&
+                      confirmingTitle != null &&
+                      confirmingTitle !== message.suggestion.title)
+                  }
+                  onSelect={() => setConfirmingTitle(message.suggestion.title)}
+                  onConfirm={() => onPickSuggestion(message.suggestion)}
+                  onCancel={() => setConfirmingTitle(null)}
+                />
+              </FadeInBlock>
             );
           }
 
           if (message.kind === 'recipe') {
             return (
-              <View key={message.id} style={styles.assistantBlock}>
-                <RecipeCard recipe={message.recipe} />
-              </View>
+              <FadeInBlock key={message.id} style={styles.assistantBlock}>
+                <RecipeCard
+                  recipe={message.recipe}
+                  dietFilter={suggestionDiet}
+                  cuisineFilter={suggestionCuisine}
+                  macros={pickedSuggestion}
+                />
+              </FadeInBlock>
             );
           }
 
@@ -589,7 +1015,6 @@ export default function ChatScreen() {
             !message.answered &&
             isGeminiConfigured &&
             !generating;
-
           return (
             <View key={message.id} style={styles.messageBlock}>
               <View style={[styles.bubbleRow, isUser && styles.bubbleRowUser]}>
@@ -615,121 +1040,215 @@ export default function ChatScreen() {
               </View>
 
               {showOptions ? (
-                <OptionsCarousel
-                  options={message.options!}
-                  onSelect={onSelectOption}
-                  labelFor={to}
-                />
+                pending.type === 'suggestion-diet' ||
+                pending.type === 'suggestion-cuisine' ? (
+                  <DietFilterList
+                    key={message.id}
+                    options={message.options!}
+                    onSelect={onSelectOption}
+                    labelFor={to}
+                  />
+                ) : (
+                  <OptionsCarousel
+                    options={message.options!}
+                    onSelect={onSelectOption}
+                    labelFor={to}
+                    primaryOption={
+                      pending.type === 'want-recipe'
+                        ? YES_RECIPE_OPTION
+                        : undefined
+                    }
+                  />
+                )
               ) : null}
             </View>
           );
         })}
 
-        {generating ? (
-          <View style={styles.bubbleRow}>
-            <View style={[styles.bubble, styles.assistantBubble, styles.typing]}>
-              <ActivityIndicator color={colors.text} />
-              <Text style={styles.bubbleText}>{typingLabel}</Text>
-            </View>
-          </View>
-        ) : null}
-      </ScrollView>
+        {generating ? <ThinkingStatus label={thinkingLabel} /> : null}
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-    </View>
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+      </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   flex: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: colors.page,
   },
-  toolbar: {
+  pageContent: {
+    paddingHorizontal: 20,
+    flexGrow: 1,
+    backgroundColor: colors.page,
+  },
+  newChatButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: 8,
-    paddingHorizontal: 16,
+    minHeight: 42,
+    gap: 2,
+    backgroundColor: USER_BUBBLE_BG,
+    borderRadius: 999,
+    paddingLeft: 12,
+    paddingRight: 16,
     paddingVertical: 8,
   },
-  toolbarSpacer: {
-    flex: 1,
+  newChatButtonText: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '400',
   },
-  headerButton: {
-    backgroundColor: colors.surfaceElevated,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    minHeight: 36,
+  contextRow: {
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
+    gap: 6,
+    marginBottom: 10,
   },
-  headerButtonText: {
+  contextPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 1,
+    gap: 5,
+    backgroundColor: colors.card,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
+    elevation: 1,
+  },
+  contextPillEnd: {
+    paddingRight: 23,
+  },
+  contextPillPrimary: {
+    backgroundColor: colors.buttonPrimaryBg,
+    flexShrink: 0,
+  },
+  contextText: {
     color: colors.text,
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '400',
   },
-  plusButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.surfaceElevated,
-    alignItems: 'center',
-    justifyContent: 'center',
+  contextTextPrimary: {
+    color: colors.buttonPrimaryText,
+  },
+  slotMenuRoot: {
+    flex: 1,
+  },
+  slotMenuBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  slotMenu: {
+    position: 'absolute',
+    minWidth: 148,
+    backgroundColor: colors.card,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 6,
+    gap: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
+  },
+  slotMenuItem: {
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  slotMenuItemSelected: {
+    backgroundColor: colors.buttonPrimaryBg,
+  },
+  slotMenuItemText: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '400',
+  },
+  slotMenuItemTextSelected: {
+    color: colors.buttonPrimaryText,
   },
   notice: {
     color: colors.textSecondary,
     backgroundColor: colors.surface,
-    borderRadius: 10,
+    borderRadius: 12,
     padding: 12,
-    marginHorizontal: 20,
     marginBottom: 8,
     lineHeight: 20,
   },
   chatContent: {
-    paddingHorizontal: CHAT_GUTTER,
-    paddingTop: 4,
-    paddingBottom: 24,
-    gap: 14,
+    paddingTop: 6,
+    gap: 16,
   },
   messageBlock: {
-    gap: 8,
+    gap: 10,
   },
   bubbleRow: {
     flexDirection: 'row',
+    alignItems: 'flex-end',
     justifyContent: 'flex-start',
+    gap: 8,
   },
   bubbleRowUser: {
     justifyContent: 'flex-end',
   },
   bubble: {
-    maxWidth: '82%',
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    maxWidth: '84%',
+    borderRadius: 20,
+    paddingHorizontal: 15,
+    paddingVertical: 11,
   },
   assistantBubble: {
     backgroundColor: 'transparent',
     paddingHorizontal: 2,
     paddingVertical: 2,
-    maxWidth: '92%',
+    maxWidth: '100%',
+    borderRadius: 0,
   },
   userBubble: {
-    backgroundColor: colors.buttonPrimaryBg,
-    borderTopRightRadius: 6,
+    backgroundColor: USER_BUBBLE_BG,
+    borderBottomRightRadius: 8,
   },
   bubbleText: {
     color: colors.text,
     fontSize: 15,
-    lineHeight: 21,
+    lineHeight: 22,
   },
   userBubbleText: {
-    color: colors.buttonPrimaryText,
+    color: colors.text,
+    fontWeight: '400',
   },
   typing: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 6,
+  },
+  thinkingPulseWrap: {
+    width: 10,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'visible',
+  },
+  thinkingPulseDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: colors.text,
+  },
+  typingText: {
+    color: colors.text,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  typingDotsSpacer: {
+    opacity: 0,
   },
   assistantBlock: {
     alignSelf: 'stretch',
@@ -745,25 +1264,51 @@ const styles = StyleSheet.create({
     paddingHorizontal: CHAT_GUTTER,
   },
   optionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     backgroundColor: colors.card,
     borderColor: colors.border,
     borderWidth: 1,
     borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: 15,
+    paddingVertical: 11,
+  },
+  optionChipPrimary: {
+    backgroundColor: colors.buttonPrimaryBg,
+    borderColor: colors.buttonPrimaryBg,
   },
   optionChipText: {
     color: colors.text,
     fontSize: 14,
-    fontWeight: '500',
+    fontWeight: '400',
+  },
+  optionChipTextPrimary: {
+    color: colors.buttonPrimaryText,
+    fontWeight: '400',
   },
   buttonDisabled: {
     opacity: 0.5,
   },
   error: {
     color: '#FF6B6B',
-    paddingHorizontal: 20,
     paddingBottom: 8,
     lineHeight: 20,
+  },
+  dietList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  dietChip: {
+    backgroundColor: colors.card,
+    borderRadius: 999,
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
+    elevation: 1,
   },
 });

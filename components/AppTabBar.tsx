@@ -7,8 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '@/constants/theme';
 import { useLanguage } from '@/context/LanguageContext';
 
-const LEFT_ROUTES = ['index', 'chat'] as const;
-const RIGHT_ROUTES = ['calendar', 'profile'] as const;
+const TAB_ROUTES = ['index', 'profile', 'calendar', 'chat'] as const;
 const ANALYZE_HREF = '/analyze' as Href;
 
 const ICONS: Record<
@@ -16,15 +15,18 @@ const ICONS: Record<
   { outline: keyof typeof Ionicons.glyphMap; filled: keyof typeof Ionicons.glyphMap }
 > = {
   index: { outline: 'home-outline', filled: 'home' },
-  chat: { outline: 'chatbubble-ellipses-outline', filled: 'chatbubble-ellipses' },
   calendar: { outline: 'calendar-outline', filled: 'calendar' },
+  chat: { outline: 'chatbubble-ellipses-outline', filled: 'chatbubble-ellipses' },
 };
 
-const LABELS: Record<string, 'tabs.home' | 'tabs.chat' | 'tabs.calendar' | 'tabs.progress'> = {
+const LABELS: Record<
+  string,
+  'tabs.home' | 'tabs.calendar' | 'tabs.progress' | 'tabs.chat'
+> = {
   index: 'tabs.home',
-  chat: 'tabs.chat',
-  calendar: 'tabs.calendar',
   profile: 'tabs.progress',
+  calendar: 'tabs.calendar',
+  chat: 'tabs.chat',
 };
 
 function TabItem({
@@ -130,8 +132,8 @@ export function AppTabBar({ state, navigation }: BottomTabBarProps) {
       pointerEvents="box-none"
       style={[styles.container, { paddingBottom: Math.max(insets.bottom, 12) }]}
     >
-      <View style={styles.bar}>
-        <View style={styles.side}>{LEFT_ROUTES.map(renderTab)}</View>
+      <View style={styles.row}>
+        <View style={styles.bar}>{TAB_ROUTES.map(renderTab)}</View>
 
         <Pressable
           accessibilityRole="button"
@@ -144,8 +146,6 @@ export function AppTabBar({ state, navigation }: BottomTabBarProps) {
             <Ionicons name="add" size={30} color={colors.buttonPrimaryText} />
           </View>
         </Pressable>
-
-        <View style={styles.side}>{RIGHT_ROUTES.map(renderTab)}</View>
       </View>
     </View>
   );
@@ -162,7 +162,13 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     transform: [{ translateY: 4 }],
   },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
   bar: {
+    flex: 1,
     height: 68,
     flexDirection: 'row',
     alignItems: 'center',
@@ -176,10 +182,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.12,
     shadowRadius: 20,
     elevation: 10,
-  },
-  side: {
-    flex: 1,
-    flexDirection: 'row',
   },
   tab: {
     flex: 1,
@@ -212,7 +214,6 @@ const styles = StyleSheet.create({
   plusWrap: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginHorizontal: 8,
     borderRadius: 32,
     ...Platform.select({
       ios: {
@@ -236,7 +237,5 @@ const styles = StyleSheet.create({
     backgroundColor: colors.buttonPrimaryBg,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 5,
-    borderColor: colors.background,
   },
 });

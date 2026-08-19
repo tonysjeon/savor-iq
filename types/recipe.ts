@@ -43,7 +43,22 @@ export const INGREDIENT_PRESETS = [
   'Leftover-friendly',
 ] as const;
 
+export const CUISINE_OPTIONS = [
+  'Any',
+  'Italian',
+  'Mexican',
+  'Japanese',
+  'Korean',
+  'Chinese',
+  'Indian',
+  'Mediterranean',
+  'American',
+  'Thai',
+  'Middle Eastern',
+] as const;
+
 export type DietOption = (typeof DIET_OPTIONS)[number];
+export type CuisineOption = (typeof CUISINE_OPTIONS)[number];
 export type PreparationMethod = (typeof PREPARATION_METHODS)[number];
 export type IngredientPreset = (typeof INGREDIENT_PRESETS)[number];
 export type ServingOption = (typeof SERVING_OPTIONS)[number];
