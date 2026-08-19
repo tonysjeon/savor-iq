@@ -108,7 +108,7 @@ function BottleIcon() {
 
 function LargeBottleIcon() {
   return (
-    <Svg width={32} height={34} viewBox="0 0 28 30" overflow="visible">
+    <Svg width={32} height={34} viewBox="0 0 28 30">
       <G transform="translate(14 16) scale(1.1) translate(-14 -16)">
       <Path
         d="M10.75 6.7 H17.25 C17.55 6.7 17.75 6.9 17.75 7.2 V9.7 H10.25 V7.2 C10.25 6.9 10.45 6.7 10.75 6.7 Z"
