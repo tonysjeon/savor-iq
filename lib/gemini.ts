@@ -1,6 +1,9 @@
 import { outputLanguageInstruction } from '@/lib/i18n';
-import type { MealPlan } from '@/types/mealPlan';
-import { weekdaysStartingFrom } from '@/types/mealPlan';
+import type {
+  MealHistoryItem,
+  MealSuggestion,
+  MealSuggestionContext,
+} from '@/types/mealSuggestion';
 import type { NutritionInfo } from '@/types/nutrition';
 import type { Recipe } from '@/types/recipe';
 
@@ -190,11 +193,37 @@ type RecipeJson = {
   nutrition?: unknown;
 };
 
+const GOAL_BRIEFS = {
+  lose: 'losing weight, so favor high satiety per calorie and lean protein',
+  maintain: 'maintaining weight, so keep the meal balanced',
+  gain: 'gaining weight, so favor calorie-dense, protein-rich food',
+} as const;
+
+function describeMeals(items: MealHistoryItem[]): string {
+  if (items.length === 0) return 'none';
+  return items
+    .map((item) => {
+      const time = item.hour == null ? '' : ` at ${item.hour}:00`;
+      return `${item.foodName}${time} (${item.calories} kcal, P ${item.proteinGrams}g, C ${item.carbsGrams}g, F ${item.fatGrams}g)`;
+    })
+    .join('; ');
+}
+
+function describeBudget(budget: {
+  calories: number;
+  proteinGrams: number;
+  carbsGrams: number;
+  fatGrams: number;
+}): string {
+  return `${budget.calories} kcal, protein ${budget.proteinGrams}g, carbs ${budget.carbsGrams}g, fat ${budget.fatGrams}g`;
+}
+
 export async function generateRecipe(
   ingredients: string,
   dietFilter: string,
   preparationMethod: string,
   servings: number,
+  context?: MealSuggestionContext,
 ): Promise<Recipe> {
   const diet =
     dietFilter === 'None' || dietFilter.trim() === '' ? '' : `${dietFilter} `;
@@ -202,14 +231,30 @@ export async function generateRecipe(
     preparationMethod === 'Any Method' || preparationMethod.trim() === ''
       ? 'any cooking method'
       : preparationMethod;
+  const contextBlock = context
+    ? `
+This is a ${context.mealSlot} for someone ${GOAL_BRIEFS[context.goal]}.
+Cuisine preference: ${
+          !context.cuisineFilter ||
+          context.cuisineFilter === 'Any' ||
+          context.cuisineFilter.trim() === ''
+            ? 'any'
+            : context.cuisineFilter
+        }.
+Daily targets: ${describeBudget(context.daily)}.
+Remaining today: ${describeBudget(context.remaining)}.
+Aim this meal at roughly: ${describeBudget(context.slotBudget)}.
+Eaten today: ${describeMeals(context.eatenToday)}.
+Keep nutrition close to that slot budget and never exceed remaining daily calories.`
+    : '';
 
   try {
     const response = await post(
       TEXT_MODEL,
       [
         {
-          text: `You are a professional chef. Create a ${diet}recipe using: ${ingredients}.
-Preparation: ${method}. Servings: ${servings}.
+          text: `You are a professional chef. Create a ${diet}recipe for: ${ingredients}.
+Preparation: ${method}. Servings: ${servings}.${contextBlock}
 
 Return ONLY valid JSON (no markdown, no extra text) with this exact shape:
 {
@@ -458,42 +503,69 @@ Use Title Case for foodName. Protein, carbs, fat, fiber, and sugar are grams; so
   }
 }
 
-export async function generateMealPlan(
-  preferences: string,
-  dietFilter: string,
-  startDays: string[],
-): Promise<MealPlan> {
+export async function generateMealSuggestions(
+  context: MealSuggestionContext,
+  avoidTitles: string[] = [],
+): Promise<MealSuggestion[]> {
   const diet =
-    dietFilter === 'None' || dietFilter.trim() === '' ? 'balanced' : dietFilter;
-  const daysList = startDays.length === 7 ? startDays : weekdaysStartingFrom();
-  const dayShape = daysList
-    .map(
-      (name) =>
-        `    {"name": "${name}", "breakfast": "...", "lunch": "...", "dinner": "..."}`,
-    )
-    .join(',\n');
+    context.dietFilter === 'None' || context.dietFilter.trim() === ''
+      ? 'no restrictions'
+      : context.dietFilter;
+  const cuisine =
+    !context.cuisineFilter ||
+    context.cuisineFilter === 'Any' ||
+    context.cuisineFilter.trim() === ''
+      ? 'any cuisine they enjoy'
+      : `${context.cuisineFilter} cuisine`;
+  const nearBudget =
+    context.slotBudget.calories > 0 && context.slotBudget.calories < 350;
 
   const response = await post(
     TEXT_MODEL,
     [
       {
-        text: `You are a nutrition expert. Generate a 7-day meal plan starting today (${daysList[0]}).
-Use these exact day names in order: ${daysList.join(', ')}.
-Diet: ${diet}.
-User preferences:
-${preferences}
+        text: `You are a registered dietitian recommending THREE distinct ${context.mealSlot} options to eat right now.
+
+The user is ${GOAL_BRIEFS[context.goal]}.
+Diet restrictions: ${diet}.
+Cuisine preference: ${cuisine}.
+Daily targets: ${describeBudget(context.daily)}.
+Remaining today: ${describeBudget(context.remaining)}.
+Meals left today including this one: ${context.remainingMeals}.
+Aim each ${context.mealSlot} around ${context.slotBudget.calories} kcal (protein ${context.slotBudget.proteinGrams}g, carbs ${context.slotBudget.carbsGrams}g, fat ${context.slotBudget.fatGrams}g).
+Eaten today: ${describeMeals(context.eatenToday)}.
+Recent meals across days: ${describeMeals(context.recentMeals)}.
+${avoidTitles.length ? `Do not suggest again: ${avoidTitles.join('; ')}.` : ''}
+Rules:
+- Return exactly 3 specific, realistic ${context.mealSlot} dishes, not recipes with steps.
+- Make the three options clearly different (protein, cuisine, or prep).
+- If a specific cuisine is requested, keep all three dishes in that cuisine.
+- Echo cuisines and ingredients the recent meals suggest they like, but do not repeat a dish they just ate.
+- Calories must be a normal single-meal portion around ${context.slotBudget.calories} kcal, never the entire remaining daily budget.
+- Logged history may be incomplete — do not try to "use up" leftover calories.
+- Stay at or below remaining calories (${context.remaining.calories} kcal).
+${nearBudget ? '- They are close to their calorie budget, so keep all three light and say so in the reason.\n' : ''}- reason is one short sentence tying the pick to their goal.
+- swaps holds 2 brief alternative ideas or tweaks.
 
 Return ONLY valid JSON with this exact shape:
 {
-  "days": [
-${dayShape}
+  "meals": [
+    {
+      "title": "Dish name",
+      "reason": "Why this fits right now",
+      "calories": 0,
+      "proteinGrams": 0,
+      "carbsGrams": 0,
+      "fatGrams": 0,
+      "swaps": ["short idea", "short idea"]
+    }
   ]
 }${outputLanguageInstruction()}`,
       },
     ],
     {
-      temperature: 0.7,
-      maxOutputTokens: 8192,
+      temperature: 0.8,
+      maxOutputTokens: 4096,
       responseMimeType: 'application/json',
       thinkingConfig: { thinkingBudget: 0 },
     },
@@ -504,31 +576,49 @@ ${dayShape}
   try {
     data = parseJsonObject(raw);
   } catch {
-    throw new Error('Could not parse meal plan from Gemini response.');
+    throw new Error('Could not parse meal suggestions from Gemini response.');
   }
 
-  if (!Array.isArray(data.days)) {
-    throw new Error('Meal plan response was missing a days array.');
+  const mealsRaw = Array.isArray(data.meals) ? data.meals : [];
+  const meals = mealsRaw
+    .map((item) => {
+      const meal =
+        item && typeof item === 'object'
+          ? (item as Record<string, unknown>)
+          : {};
+      const title = typeof meal.title === 'string' ? meal.title.trim() : '';
+      if (!title) return null;
+      return {
+        mealSlot: context.mealSlot,
+        title,
+        reason: typeof meal.reason === 'string' ? meal.reason.trim() : '',
+        calories: Math.round(
+          Math.min(
+            Math.round(context.slotBudget.calories * 1.2),
+            context.remaining.calories || context.slotBudget.calories,
+            Math.max(160, toNumber(meal.calories, context.slotBudget.calories)),
+          ),
+        ),
+        proteinGrams: Math.round(
+          toNumber(meal.proteinGrams, context.slotBudget.proteinGrams),
+        ),
+        carbsGrams: Math.round(
+          toNumber(meal.carbsGrams, context.slotBudget.carbsGrams),
+        ),
+        fatGrams: Math.round(
+          toNumber(meal.fatGrams, context.slotBudget.fatGrams),
+        ),
+        swaps: Array.isArray(meal.swaps)
+          ? meal.swaps.map(String).filter(Boolean).slice(0, 3)
+          : [],
+      } satisfies MealSuggestion;
+    })
+    .filter((meal): meal is MealSuggestion => meal !== null)
+    .slice(0, 3);
+
+  if (meals.length === 0) {
+    throw new Error('Meal suggestion response was missing dishes.');
   }
 
-  const days = data.days.map((day, index) => {
-    const item =
-      day && typeof day === 'object' ? (day as Record<string, unknown>) : {};
-    return {
-      name:
-        typeof item.name === 'string' && item.name.trim()
-          ? item.name
-          : daysList[index] ?? `Day ${index + 1}`,
-      breakfast:
-        typeof item.breakfast === 'string' ? item.breakfast : 'Not specified',
-      lunch: typeof item.lunch === 'string' ? item.lunch : 'Not specified',
-      dinner: typeof item.dinner === 'string' ? item.dinner : 'Not specified',
-    };
-  });
-
-  if (days.length === 0) {
-    throw new Error('Gemini returned an empty meal plan.');
-  }
-
-  return { days };
+  return meals;
 }
