@@ -32,9 +32,9 @@ export default function TabsLayout() {
         name="index"
         options={{ title: 'Home', sceneStyle: { backgroundColor: colors.page } }}
       />
-      <Tabs.Screen name="chat" options={{ title: 'Chat' }} />
-      <Tabs.Screen name="calendar" options={{ title: 'Calendar' }} />
       <Tabs.Screen name="profile" options={{ title: 'Progress' }} />
+      <Tabs.Screen name="calendar" options={{ title: 'Calendar' }} />
+      <Tabs.Screen name="chat" options={{ title: 'Chat', sceneStyle: { backgroundColor: colors.page } }} />
     </Tabs>
   );
 }
