@@ -209,42 +209,6 @@ function FadeInBlock({
   );
 }
 
-function TypingDots() {
-  const progress = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.timing(progress, {
-        toValue: 1,
-        duration: 1200,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      }),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [progress]);
-
-  return (
-    <View style={styles.typingDots}>
-      {[0, 1, 2].map((index) => (
-        <Animated.View
-          key={index}
-          style={[
-            styles.typingDot,
-            {
-              opacity: progress.interpolate({
-                inputRange: [0, 0.2 + index * 0.2, 0.5 + index * 0.2, 1],
-                outputRange: [0.25, 1, 0.25, 0.25],
-              }),
-            },
-          ]}
-        />
-      ))}
-    </View>
-  );
-}
-
 function MealSlotPicker({
   value,
   onChange,
@@ -375,6 +339,80 @@ function FadeChip({
   );
 }
 
+function ThinkingPulse() {
+  const pulse = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 820,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0,
+          duration: 820,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse]);
+
+  return (
+    <View style={styles.thinkingPulseWrap}>
+      <Animated.View
+        style={[
+          styles.thinkingPulseDot,
+          {
+            transform: [
+              {
+                scale: pulse.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0.62, 1],
+                }),
+              },
+            ],
+          },
+        ]}
+      />
+    </View>
+  );
+}
+
+function thinkingBase(text: string) {
+  return text.replace(/[.…]+$/u, '').trimEnd();
+}
+
+function ThinkingStatus({ label }: { label: string }) {
+  const [dotCount, setDotCount] = useState(0);
+
+  useEffect(() => {
+    setDotCount(0);
+    const timer = setInterval(() => {
+      setDotCount((count) => (count + 1) % 4);
+    }, 280);
+    return () => clearInterval(timer);
+  }, [label]);
+
+  return (
+    <View style={styles.bubbleRow}>
+      <View style={[styles.bubble, styles.assistantBubble, styles.typing]}>
+        <ThinkingPulse />
+        <Text style={styles.typingText}>
+          {thinkingBase(label)}
+          {'.'.repeat(dotCount)}
+          <Text style={styles.typingDotsSpacer}>{'.'.repeat(3 - dotCount)}</Text>
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 function DietFilterList({
   options,
   onSelect,
@@ -482,6 +520,19 @@ export default function ChatScreen() {
   const { t, to, language, locale } = useLanguage();
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
+  const stickToBottomRef = useRef(false);
+  const scrollYRef = useRef(0);
+
+  function scrollChatToBottom(animated = true) {
+    scrollRef.current?.scrollToEnd({ animated });
+  }
+
+  function nudgeScrollDown(distance = 88) {
+    scrollRef.current?.scrollTo({
+      y: scrollYRef.current + distance,
+      animated: true,
+    });
+  }
 
   const [analyses, setAnalyses] = useState<SavedNutrition[]>([]);
   const [pending, setPending] = useState<PendingPrompt>({
@@ -500,6 +551,11 @@ export default function ChatScreen() {
   );
   const [mealSlot, setMealSlot] = useState<MealSlot>(() => mealSlotFromDate());
 
+  function greetingForSlot(slot: MealSlot) {
+    const meal = t(mealSlotMessageKey(slot)).toLocaleLowerCase(locale);
+    return t('chat.greeting', { meal });
+  }
+
   const dayContext = useMemo(
     () =>
       buildMealSuggestionContext({
@@ -511,16 +567,18 @@ export default function ChatScreen() {
       }),
     [profile, analyses, suggestionDiet, suggestionCuisine, mealSlot],
   );
-  const slotLabel = t(mealSlotMessageKey(dayContext.mealSlot));
-  const slotLabelLower = slotLabel.toLocaleLowerCase(locale);
 
   const queuedSuggestionsRef = useRef<{
     afterId: string;
     messages: SuggestionMessage[];
   } | null>(null);
+  const queuedRecipeFollowUpRef = useRef<{
+    afterId: string;
+    messages: ChatMessage[];
+  } | null>(null);
 
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
-    openingMessages(t('chat.greeting', { meal: slotLabelLower })),
+    openingMessages(greetingForSlot(mealSlotFromDate())),
   );
 
   function markStreamReady(id: string) {
@@ -528,10 +586,20 @@ export default function ChatScreen() {
       current[id] ? current : { ...current, [id]: true },
     );
     const queued = queuedSuggestionsRef.current;
-    if (!queued || queued.afterId !== id) return;
-    queuedSuggestionsRef.current = null;
-    setMessages((current) => [...current, ...queued.messages]);
-    setPending({ type: 'pick-suggestion' });
+    if (queued && queued.afterId === id) {
+      queuedSuggestionsRef.current = null;
+      setMessages((current) => [...current, ...queued.messages]);
+      setPending({ type: 'pick-suggestion' });
+      return;
+    }
+    const recipeFollowUp = queuedRecipeFollowUpRef.current;
+    if (recipeFollowUp && recipeFollowUp.afterId === id) {
+      queuedRecipeFollowUpRef.current = null;
+      setMessages((current) => [...current, ...recipeFollowUp.messages]);
+      requestAnimationFrame(() => nudgeScrollDown(360));
+      setTimeout(() => nudgeScrollDown(360), 80);
+      setTimeout(() => nudgeScrollDown(360), 220);
+    }
   }
 
   const applyCache = useCallback((uid: string) => {
@@ -575,7 +643,7 @@ export default function ChatScreen() {
     });
   }, [user, applyCache]);
 
-  async function buildSuggestions(nextDiet: string, nextCuisine: string) {
+async function buildSuggestions(nextDiet: string, nextCuisine: string) {
     setGenerating(true);
     setPending({ type: 'none' });
     setError(null);
@@ -594,13 +662,7 @@ export default function ChatScreen() {
     );
     const isFirstSuggestion = suggestedTitles.length === 0;
 
-    setMessages((current) => [
-      ...markPromptAnswered(current),
-      assistantText(t('chat.pickingMeal')),
-      ...(isFirstSuggestion && !profile?.recommendation
-        ? [assistantText(t('chat.usingDefaultTargets'))]
-        : []),
-    ]);
+    setMessages((current) => markPromptAnswered(current));
 
     try {
       const meals = await generateMealSuggestions(context, suggestedTitles);
@@ -621,7 +683,14 @@ export default function ChatScreen() {
           selected: false,
         })),
       };
-      setMessages((current) => [...current, intro]);
+      setMessages((current) => [
+        ...current,
+        ...(isFirstSuggestion && !profile?.recommendation
+          ? [assistantText(t('chat.usingDefaultTargets'))]
+          : []),
+        intro,
+      ]);
+      setGenerating(false);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : t('chat.unableSuggestion');
@@ -655,22 +724,17 @@ export default function ChatScreen() {
       assistantText(t('chat.wantRecipe'), RECIPE_FOLLOW_UP),
     ]);
     setPending({ type: 'want-recipe' });
-    requestAnimationFrame(() => {
-      scrollRef.current?.scrollToEnd({ animated: true });
-    });
-    setTimeout(() => {
-      scrollRef.current?.scrollToEnd({ animated: true });
-    }, 120);
+    stickToBottomRef.current = true;
+    requestAnimationFrame(() => scrollChatToBottom(true));
+    setTimeout(() => scrollChatToBottom(true), 50);
+    setTimeout(() => scrollChatToBottom(true), 200);
   }
 
   async function buildRecipeForPick(suggestion: MealSuggestion) {
     setGenerating(true);
     setPending({ type: 'none' });
     setError(null);
-    setMessages((current) => [
-      ...markPromptAnswered(current),
-      assistantText(t('chat.cooking')),
-    ]);
+    setMessages((current) => markPromptAnswered(current));
 
     const context = buildMealSuggestionContext({
       profile,
@@ -688,12 +752,21 @@ export default function ChatScreen() {
         1,
         context,
       );
-      setMessages((current) => [
-        ...current,
-        assistantText(t('chat.heresRecipe')),
-        { id: nextId('recipe'), role: 'assistant', kind: 'recipe', recipe },
-        assistantText(t('chat.tapRestartElse')),
-      ]);
+      const intro = assistantText(t('chat.heresRecipe'));
+      queuedRecipeFollowUpRef.current = {
+        afterId: intro.id,
+        messages: [
+          {
+            id: nextId('recipe'),
+            role: 'assistant' as const,
+            kind: 'recipe' as const,
+            recipe,
+          },
+          assistantText(t('chat.tapRestartElse')),
+        ],
+      };
+      setMessages((current) => [...current, intro]);
+      setGenerating(false);
 
       if (user) {
         try {
@@ -759,12 +832,15 @@ export default function ChatScreen() {
     }
 
     if (pending.type === 'want-recipe') {
+      stickToBottomRef.current = false;
       if (option === YES_RECIPE_OPTION && pickedSuggestion) {
         setMessages((current) => [
           ...markPromptAnswered(current),
           userText(to(option)),
         ]);
         void buildRecipeForPick(pickedSuggestion);
+        requestAnimationFrame(() => nudgeScrollDown());
+        setTimeout(() => nudgeScrollDown(), 80);
         return;
       }
 
@@ -774,12 +850,15 @@ export default function ChatScreen() {
         assistantText(t('chat.noRecipeReply')),
       ]);
       setPending({ type: 'none' });
+      requestAnimationFrame(() => nudgeScrollDown());
+      setTimeout(() => nudgeScrollDown(), 80);
     }
   }
 
-  function resetChat(meal = slotLabelLower) {
+  function resetChat(slot: MealSlot = mealSlot) {
     messageSeq = 0;
-    setMessages(openingMessages(t('chat.greeting', { meal })));
+    setMealSlot(slot);
+    setMessages(openingMessages(greetingForSlot(slot)));
     setPending({ type: 'suggestion-diet' });
     setSuggestionDiet('None');
     setSuggestionCuisine('Any');
@@ -790,6 +869,8 @@ export default function ChatScreen() {
     setError(null);
     setStreamReadyIds({});
     queuedSuggestionsRef.current = null;
+    queuedRecipeFollowUpRef.current = null;
+    stickToBottomRef.current = false;
   }
 
   function onRestart() {
@@ -797,9 +878,7 @@ export default function ChatScreen() {
   }
 
   function onChangeMealSlot(slot: MealSlot) {
-    setMealSlot(slot);
-    const meal = t(mealSlotMessageKey(slot)).toLocaleLowerCase(locale);
-    resetChat(meal);
+    resetChat(slot);
   }
 
   const didApplyLanguage = useRef(false);
@@ -813,19 +892,12 @@ export default function ChatScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [language]);
 
-  const typingLabel =
+  const thinkingLabel =
     pending.type === 'none' && pickedSuggestion
-      ? t('chat.draftingRecipe')
-      : t('chat.draftingSuggestion');
+      ? t('chat.cooking')
+      : t('chat.thinking');
 
   const tabClearance = TAB_BAR_HEIGHT + Math.max(insets.bottom, 12);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      scrollRef.current?.scrollToEnd({ animated: true });
-    }, 50);
-    return () => clearTimeout(timer);
-  }, [messages, pending, generating, streamReadyIds]);
 
   return (
     <ScrollView
@@ -839,6 +911,15 @@ export default function ChatScreen() {
         },
       ]}
       keyboardShouldPersistTaps="handled"
+      scrollEventThrottle={16}
+      onScroll={(event) => {
+        scrollYRef.current = event.nativeEvent.contentOffset.y;
+      }}
+      onContentSizeChange={() => {
+        if (stickToBottomRef.current) {
+          scrollChatToBottom(true);
+        }
+      }}
     >
       <PageHeader
         title={t('chat.title')}
@@ -915,7 +996,12 @@ export default function ChatScreen() {
           if (message.kind === 'recipe') {
             return (
               <FadeInBlock key={message.id} style={styles.assistantBlock}>
-                <RecipeCard recipe={message.recipe} />
+                <RecipeCard
+                  recipe={message.recipe}
+                  dietFilter={suggestionDiet}
+                  cuisineFilter={suggestionCuisine}
+                  macros={pickedSuggestion}
+                />
               </FadeInBlock>
             );
           }
@@ -979,14 +1065,7 @@ export default function ChatScreen() {
           );
         })}
 
-        {generating ? (
-          <View style={styles.bubbleRow}>
-            <View style={[styles.bubble, styles.assistantBubble, styles.typing]}>
-              <TypingDots />
-              <Text style={styles.typingText}>{typingLabel}</Text>
-            </View>
-          </View>
-        ) : null}
+        {generating ? <ThinkingStatus label={thinkingLabel} /> : null}
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </View>
@@ -1105,7 +1184,7 @@ const styles = StyleSheet.create({
   },
   chatContent: {
     paddingTop: 6,
-    gap: 10,
+    gap: 16,
   },
   messageBlock: {
     gap: 10,
@@ -1148,22 +1227,28 @@ const styles = StyleSheet.create({
   typing: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 6,
   },
-  typingDots: {
-    flexDirection: 'row',
+  thinkingPulseWrap: {
+    width: 10,
+    height: 20,
     alignItems: 'center',
-    gap: 4,
+    justifyContent: 'center',
+    overflow: 'visible',
   },
-  typingDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+  thinkingPulseDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
     backgroundColor: colors.text,
   },
   typingText: {
-    color: colors.textSecondary,
+    color: colors.text,
     fontSize: 14,
+    lineHeight: 20,
+  },
+  typingDotsSpacer: {
+    opacity: 0,
   },
   assistantBlock: {
     alignSelf: 'stretch',

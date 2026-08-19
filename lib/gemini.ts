@@ -193,6 +193,23 @@ type RecipeJson = {
   nutrition?: unknown;
 };
 
+function expandRecipeSteps(steps: string[]): string[] {
+  const expanded: string[] = [];
+  for (const step of steps) {
+    const trimmed = step.trim().replace(/^Step\s*\d+[:.)]\s*/i, '');
+    if (!trimmed) continue;
+    const parts =
+      trimmed.length > 90
+        ? trimmed.split(/(?<=[.!?])\s+(?=[A-ZÀ-ÖØ-Þ])/u)
+        : [trimmed];
+    for (const part of parts) {
+      const piece = part.trim();
+      if (piece) expanded.push(piece);
+    }
+  }
+  return expanded.length > 0 ? expanded : steps;
+}
+
 const GOAL_BRIEFS = {
   lose: 'losing weight, so favor high satiety per calorie and lean protein',
   maintain: 'maintaining weight, so keep the meal balanced',
@@ -244,7 +261,7 @@ Cuisine preference: ${
 Daily targets: ${describeBudget(context.daily)}.
 Remaining today: ${describeBudget(context.remaining)}.
 Aim this meal at roughly: ${describeBudget(context.slotBudget)}.
-Eaten today: ${describeMeals(context.eatenToday)}.
+Eaten recently: ${describeMeals(context.eatenToday)}.
 Keep nutrition close to that slot budget and never exceed remaining daily calories.`
     : '';
 
@@ -256,11 +273,16 @@ Keep nutrition close to that slot budget and never exceed remaining daily calori
           text: `You are a professional chef. Create a ${diet}recipe for: ${ingredients}.
 Preparation: ${method}. Servings: ${servings}.${contextBlock}
 
+Write instructions as a true step-by-step checklist, not paragraphs.
+Each step is one short action in the imperative (e.g. "Boil the pasta until al dente.").
+Do not combine multiple actions in one step. Prefer 6–10 brief steps over 3–4 long ones.
+No step numbers inside the strings.
+
 Return ONLY valid JSON (no markdown, no extra text) with this exact shape:
 {
   "title": "Recipe Name",
   "ingredients": ["item 1", "item 2"],
-  "steps": ["Step 1 description", "Step 2 description"],
+  "steps": ["Short action.", "Next short action."],
   "nutrition": "Calories: ~X kcal | Protein: Xg | Carbs: Xg | Fat: Xg"
 }${outputLanguageInstruction()}`,
         },
@@ -293,9 +315,11 @@ Return ONLY valid JSON (no markdown, no extra text) with this exact shape:
           .map((s) => s.trim())
           .filter(Boolean);
 
-    const steps = Array.isArray(data.steps)
-      ? data.steps.map(String)
-      : ['Prepare all ingredients.', `Cook using ${method}.`];
+    const steps = expandRecipeSteps(
+      Array.isArray(data.steps)
+        ? data.steps.map(String)
+        : ['Prepare all ingredients.', `Cook using ${method}.`],
+    );
 
     const nutrition =
       typeof data.nutrition === 'string' && data.nutrition.trim()
@@ -533,7 +557,7 @@ Daily targets: ${describeBudget(context.daily)}.
 Remaining today: ${describeBudget(context.remaining)}.
 Meals left today including this one: ${context.remainingMeals}.
 Aim each ${context.mealSlot} around ${context.slotBudget.calories} kcal (protein ${context.slotBudget.proteinGrams}g, carbs ${context.slotBudget.carbsGrams}g, fat ${context.slotBudget.fatGrams}g).
-Eaten today: ${describeMeals(context.eatenToday)}.
+Eaten recently: ${describeMeals(context.eatenToday)}.
 Recent meals across days: ${describeMeals(context.recentMeals)}.
 ${avoidTitles.length ? `Do not suggest again: ${avoidTitles.join('; ')}.` : ''}
 Rules:

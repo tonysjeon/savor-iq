@@ -95,6 +95,9 @@ export function MealSuggestionCard({
           </Pressable>
         </View>
       ) : null}
+      {selected ? (
+        <View pointerEvents="none" style={styles.innerHighlight} />
+      ) : null}
       </View>
     </View>
   );
@@ -168,6 +171,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 6,
     elevation: 2,
+  },
+  innerHighlight: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: colors.text,
   },
   cardDimmed: {
     opacity: 0.5,
