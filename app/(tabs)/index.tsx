@@ -41,6 +41,7 @@ import {
   dedupeAnalyses,
   analysisFingerprint,
 } from '@/lib/userHistoryCache';
+import { getTodayWaterMl, mlToFlOz, subscribeTodayWater } from '@/lib/waterLog';
 
 const WEEKDAY_KEYS = [
   'home.weekday.su',
@@ -156,6 +157,7 @@ export default function HomeScreen() {
   const [error, setError] = useState<string | null>(null);
   const [pagerPage, setPagerPage] = useState(0);
   const [showEaten, setShowEaten] = useState(false);
+  const [waterIntake, setWaterIntake] = useState(0);
 
   const refreshFromNetwork = useCallback(async (uid: string) => {
     setError(null);
@@ -196,6 +198,18 @@ export default function HomeScreen() {
     const savedIds = new Set(analyses.map((item) => item.id));
     pruneReadyJobs(savedIds);
   }, [analyses]);
+
+  useEffect(() => {
+    let active = true;
+    void getTodayWaterMl().then((ml) => {
+      if (active) setWaterIntake(ml);
+    });
+    const unsubscribe = subscribeTodayWater(setWaterIntake);
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -281,7 +295,6 @@ export default function HomeScreen() {
     dayTotals.count > 0 ? dayTotals.healthScore / dayTotals.count : 0;
   const sugarIntake = Math.round(dayTotals.sugar);
   const sodiumIntake = Math.round(dayTotals.sodium);
-  const waterIntake = 0;
 
   function toggleIntakeMode() {
     setShowEaten((current) => !current);
@@ -498,8 +511,8 @@ export default function HomeScreen() {
                     </View>
                     <View style={styles.wideMetricCard}>
                       <AnimatedNumber
-                        value={waterIntake}
-                        suffix="ml"
+                        value={mlToFlOz(waterIntake)}
+                        suffix=" fl oz"
                         style={styles.wideMetricValue}
                       />
                       <Text style={styles.wideMetricLabel}>{t('home.water')}</Text>
