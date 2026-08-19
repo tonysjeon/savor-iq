@@ -3,8 +3,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, type Href } from 'expo-router';
 
 import { colors } from '@/constants/theme';
+import { useLanguage } from '@/context/LanguageContext';
 
 export function PageHeader({ title, showIcon = false }: { title: string; showIcon?: boolean }) {
+  const { t } = useLanguage();
   return (
     <View style={styles.header}>
       <View style={styles.titleRow}>
@@ -13,7 +15,7 @@ export function PageHeader({ title, showIcon = false }: { title: string; showIco
       </View>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Open profile"
+        accessibilityLabel={t('header.openProfile')}
         onPress={() => router.push('/account' as Href)}
         style={styles.settingsButton}
       >

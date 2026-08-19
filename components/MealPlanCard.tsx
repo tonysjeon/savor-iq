@@ -1,6 +1,7 @@
 import { StyleSheet, Text, View } from 'react-native';
 
 import { colors } from '@/constants/theme';
+import { useLanguage } from '@/context/LanguageContext';
 import type { MealPlan } from '@/types/mealPlan';
 
 type MealPlanCardProps = {
@@ -8,22 +9,23 @@ type MealPlanCardProps = {
 };
 
 export function MealPlanCard({ plan }: MealPlanCardProps) {
+  const { t } = useLanguage();
   return (
     <View style={styles.wrap}>
       {plan.days.map((day, index) => (
         <View key={`${day.name}-${index}`} style={styles.dayCard}>
           <Text style={styles.dayTitle}>
             {day.name}
-            {index === 0 ? ' · today' : ''}
+            {index === 0 ? ` · ${t('plan.today')}` : ''}
           </Text>
 
-          <Text style={styles.mealLabel}>Breakfast</Text>
+          <Text style={styles.mealLabel}>{t('plan.breakfast')}</Text>
           <Text style={styles.mealText}>{day.breakfast}</Text>
 
-          <Text style={styles.mealLabel}>Lunch</Text>
+          <Text style={styles.mealLabel}>{t('plan.lunch')}</Text>
           <Text style={styles.mealText}>{day.lunch}</Text>
 
-          <Text style={styles.mealLabel}>Dinner</Text>
+          <Text style={styles.mealLabel}>{t('plan.dinner')}</Text>
           <Text style={styles.mealText}>{day.dinner}</Text>
         </View>
       ))}

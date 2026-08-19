@@ -15,15 +15,16 @@ import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import { AvocadoIcon } from '@/components/AvocadoIcon';
 import { ProgressRing } from '@/components/ProgressRing';
 import { colors } from '@/constants/theme';
+import { useLanguage } from '@/context/LanguageContext';
 import type { MealAnalysisJob } from '@/lib/mealAnalysisQueue';
 import {
   dismissMealAnalysis,
   retryMealAnalysis,
 } from '@/lib/mealAnalysisQueue';
 
-function formatMealTime(createdAt: number | null | undefined): string {
+function formatMealTime(createdAt: number | null | undefined, locale: string): string {
   if (createdAt == null) return '';
-  return new Date(createdAt).toLocaleTimeString(undefined, {
+  return new Date(createdAt).toLocaleTimeString(locale, {
     hour: 'numeric',
     minute: '2-digit',
   });
@@ -127,6 +128,7 @@ function MealThumbnail({
 const CARD_HEIGHT = 120;
 
 export function MealProcessingCard({ job }: { job: MealAnalysisJob }) {
+  const { t, locale } = useLanguage();
   const pulse = useRef(new Animated.Value(0)).current;
   const [displayProgress, setDisplayProgress] = useState(job.progress);
   const isError = job.status === 'error';
@@ -183,13 +185,13 @@ export function MealProcessingCard({ job }: { job: MealAnalysisJob }) {
 
   if (isReady && job.result) {
     const meal = job.result;
-    const timeLabel = formatMealTime(meal.createdAt);
+    const timeLabel = formatMealTime(meal.createdAt, locale);
     return (
       <Pressable
         style={styles.card}
         onPress={() => router.push(`/meal/${meal.id}` as Href)}
         accessibilityRole="button"
-        accessibilityLabel={`Open nutrition for ${meal.foodName}`}
+        accessibilityLabel={t('meal.openNutrition', { name: meal.foodName })}
       >
         <MealThumbnail uri={imageUri} progress={displayProgress} />
         <View style={styles.body}>
@@ -202,7 +204,7 @@ export function MealProcessingCard({ job }: { job: MealAnalysisJob }) {
           <View style={styles.calorieRow}>
             <Ionicons name="flame" size={18} color={colors.text} />
             <Text style={styles.mealCalories}>
-              {Math.round(meal.calories)} calories
+              {t('meal.calories', { count: Math.round(meal.calories) })}
             </Text>
           </View>
           <View style={styles.macroRow}>
@@ -231,7 +233,7 @@ export function MealProcessingCard({ job }: { job: MealAnalysisJob }) {
           </View>
           {job.saveError ? (
             <Text style={styles.saveError} numberOfLines={2}>
-              Not saved: {job.saveError}
+              {t('processing.notSaved', { error: job.saveError })}
             </Text>
           ) : null}
         </View>
@@ -246,15 +248,15 @@ export function MealProcessingCard({ job }: { job: MealAnalysisJob }) {
           style={styles.retakePressable}
           onPress={() => retakeFromAnalysisCard(job.id)}
           accessibilityRole="button"
-          accessibilityLabel="No Food Detected. Tap to retry"
+          accessibilityLabel={`${t('processing.noFood')}. ${t('processing.tapRetry')}`}
         >
           <Image source={{ uri: job.photo.uri }} style={styles.thumb} />
           <View style={styles.body}>
             <Text style={styles.retakeTitle} numberOfLines={1}>
-              No Food Detected
+              {t('processing.noFood')}
             </Text>
             <View style={styles.retryPill}>
-              <Text style={styles.retryPillText}>Tap to retry</Text>
+              <Text style={styles.retryPillText}>{t('processing.tapRetry')}</Text>
             </View>
           </View>
         </Pressable>
@@ -262,7 +264,7 @@ export function MealProcessingCard({ job }: { job: MealAnalysisJob }) {
           style={styles.retakeDismiss}
           onPress={() => dismissMealAnalysis(job.id)}
           accessibilityRole="button"
-          accessibilityLabel="Dismiss"
+          accessibilityLabel={t('common.dismiss')}
           hitSlop={8}
         >
           <Ionicons name="close" size={16} color={colors.textMuted} />
@@ -278,23 +280,23 @@ export function MealProcessingCard({ job }: { job: MealAnalysisJob }) {
         {isError ? (
           <>
             <Text style={styles.errorTitle} numberOfLines={2}>
-              Couldn’t analyze meal
+              {t('processing.couldntAnalyze')}
             </Text>
             <Text style={styles.errorBody} numberOfLines={2}>
-              {job.error ?? 'Something went wrong.'}
+              {job.error ?? t('meal.somethingWrong')}
             </Text>
             <View style={styles.errorActions}>
               <Pressable
                 style={styles.retryButton}
                 onPress={() => retryMealAnalysis(job.id)}
               >
-                <Text style={styles.retryText}>Retry</Text>
+                <Text style={styles.retryText}>{t('common.retry')}</Text>
               </Pressable>
               <Pressable
                 style={styles.dismissButton}
                 onPress={() => dismissMealAnalysis(job.id)}
               >
-                <Text style={styles.dismissText}>Dismiss</Text>
+                <Text style={styles.dismissText}>{t('common.dismiss')}</Text>
               </Pressable>
             </View>
           </>

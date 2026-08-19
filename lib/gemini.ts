@@ -1,3 +1,4 @@
+import { outputLanguageInstruction } from '@/lib/i18n';
 import type { MealPlan } from '@/types/mealPlan';
 import { weekdaysStartingFrom } from '@/types/mealPlan';
 import type { NutritionInfo } from '@/types/nutrition';
@@ -216,7 +217,7 @@ Return ONLY valid JSON (no markdown, no extra text) with this exact shape:
   "ingredients": ["item 1", "item 2"],
   "steps": ["Step 1 description", "Step 2 description"],
   "nutrition": "Calories: ~X kcal | Protein: Xg | Carbs: Xg | Fat: Xg"
-}`,
+}${outputLanguageInstruction()}`,
         },
       ],
       {
@@ -427,7 +428,7 @@ No food (only at >=0.95 confidence):
 Food present:
 {"foodPresent":true,"foodPresenceConfidence":0.9,"foodName":"Specific Capitalized Food Name","identificationConfidence":0.8,"remainingFraction":0.75,"fullPortionNutrition":{"calories":0,"macros":{"protein":0,"carbs":0,"fat":0,"fiber":0,"sugar":0,"sodium":0}},"calories":0,"macros":{"protein":0,"carbs":0,"fat":0,"fiber":0,"sugar":0,"sodium":0},"healthScore":0,"description":"one short sentence","nutritionTips":["short tip","short tip"]}
 
-Use Title Case for foodName. Protein, carbs, fat, fiber, and sugar are grams; sodium is milligrams. healthScore is 0-10. Keep text brief.`,
+Use Title Case for foodName. Protein, carbs, fat, fiber, and sugar are grams; sodium is milligrams. healthScore is 0-10. Keep text brief.${outputLanguageInstruction()}`,
       },
       {
         inline_data: {
@@ -487,7 +488,7 @@ Return ONLY valid JSON with this exact shape:
   "days": [
 ${dayShape}
   ]
-}`,
+}${outputLanguageInstruction()}`,
       },
     ],
     {

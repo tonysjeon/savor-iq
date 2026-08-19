@@ -21,7 +21,9 @@ import { ProgressRing } from '@/components/ProgressRing';
 import { MealProcessingCard } from '@/components/MealProcessingCard';
 import { MealHistoryCard } from '@/components/MealHistoryCard';
 import { useAuth } from '@/context/AuthContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { colors } from '@/constants/theme';
+import type { MessageKey } from '@/lib/i18n';
 import {
   listNutritionAnalyses,
   type SavedNutrition,
@@ -40,7 +42,15 @@ import {
   analysisFingerprint,
 } from '@/lib/userHistoryCache';
 
-const WEEKDAY_LABELS = ['Su', 'M', 'Tu', 'W', 'Th', 'F', 'Sa'] as const;
+const WEEKDAY_KEYS = [
+  'home.weekday.su',
+  'home.weekday.m',
+  'home.weekday.tu',
+  'home.weekday.w',
+  'home.weekday.th',
+  'home.weekday.f',
+  'home.weekday.sa',
+] as const;
 const CONTENT_GUTTER = 20;
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -137,6 +147,7 @@ function sumForDay(analyses: SavedNutrition[], day: Date) {
 
 export default function HomeScreen() {
   const { user } = useAuth();
+  const { t } = useLanguage();
   const insets = useSafeAreaInsets();
   const today = useMemo(() => new Date(), []);
   const [selectedDay, setSelectedDay] = useState(() => today);
@@ -294,7 +305,7 @@ export default function HomeScreen() {
         {days.map((day) => {
           const selected = sameDay(day, selectedDay);
           const isToday = sameDay(day, today);
-          const weekday = WEEKDAY_LABELS[day.getDay()];
+          const weekday = t(WEEKDAY_KEYS[day.getDay()]);
           return (
             <Pressable
               key={startOfDay(day)}
@@ -346,8 +357,8 @@ export default function HomeScreen() {
                     accessibilityRole="button"
                     accessibilityLabel={
                       showEaten
-                        ? `Show calories ${calorieBalance.label}`
-                        : 'Show calories eaten'
+                        ? t('home.showCaloriesLeft')
+                        : t('home.showCaloriesEaten')
                     }
                   >
                     <View style={styles.calorieCopy}>
@@ -370,8 +381,8 @@ export default function HomeScreen() {
                       <View style={styles.calorieLabelRow}>
                         <Text style={styles.calorieLabel}>
                           {showEaten
-                            ? 'Calories eaten'
-                            : `Calories ${calorieBalance.label}`}
+                            ? t('home.caloriesEaten')
+                            : t('home.caloriesNamed', { label: t(`common.${calorieBalance.label}`) })}
                         </Text>
                         <Ionicons
                           name="swap-vertical"
@@ -424,8 +435,8 @@ export default function HomeScreen() {
                             />
                           )}
                           <Text style={styles.macroLabel}>
-                            {macro.label}{' '}
-                            {showEaten ? 'eaten' : balance.label}
+                            {t(`home.${macro.key}` as MessageKey)}{' '}
+                            {showEaten ? t('common.eaten') : t(`common.${balance.label}` as MessageKey)}
                           </Text>
                           <ProgressRing
                             size={64}
@@ -469,7 +480,7 @@ export default function HomeScreen() {
                           style={styles.wideMetricValue}
                         />
                       </View>
-                      <Text style={styles.wideMetricLabel}>Health score</Text>
+                      <Text style={styles.wideMetricLabel}>{t('home.healthScore')}</Text>
                       <ProgressRing
                         size={64}
                         strokeWidth={7}
@@ -491,7 +502,7 @@ export default function HomeScreen() {
                         suffix="ml"
                         style={styles.wideMetricValue}
                       />
-                      <Text style={styles.wideMetricLabel}>Water</Text>
+                      <Text style={styles.wideMetricLabel}>{t('home.water')}</Text>
                       <ProgressRing
                         size={64}
                         strokeWidth={7}
@@ -538,10 +549,10 @@ export default function HomeScreen() {
                         />
                       )}
                       <Text style={styles.macroLabel}>
-                        Fiber{' '}
+                        {t('home.fiber')}{' '}
                         {showEaten
-                          ? 'eaten'
-                          : goalBalance(dayTotals.fiber, DAILY_GOALS.fiber).label}
+                          ? t('common.eaten')
+                          : t(`common.${goalBalance(dayTotals.fiber, DAILY_GOALS.fiber).label}`)}
                       </Text>
                       <ProgressRing
                         size={64}
@@ -584,10 +595,10 @@ export default function HomeScreen() {
                         />
                       )}
                       <Text style={styles.macroLabel}>
-                        Sugar{' '}
+                        {t('home.sugar')}{' '}
                         {showEaten
-                          ? 'eaten'
-                          : goalBalance(sugarIntake, DAILY_GOALS.sugar).label}
+                          ? t('common.eaten')
+                          : t(`common.${goalBalance(sugarIntake, DAILY_GOALS.sugar).label}`)}
                       </Text>
                       <ProgressRing
                         size={64}
@@ -632,10 +643,10 @@ export default function HomeScreen() {
                         />
                       )}
                       <Text style={styles.macroLabel}>
-                        Sodium{' '}
+                        {t('home.sodium')}{' '}
                         {showEaten
-                          ? 'eaten'
-                          : goalBalance(sodiumIntake, DAILY_GOALS.sodium).label}
+                          ? t('common.eaten')
+                          : t(`common.${goalBalance(sodiumIntake, DAILY_GOALS.sodium).label}`)}
                       </Text>
                       <ProgressRing
                         size={64}
@@ -662,7 +673,7 @@ export default function HomeScreen() {
             </View>
           </View>
 
-          <Text style={styles.sectionTitle}>Recently uploaded</Text>
+          <Text style={styles.sectionTitle}>{t('home.recentlyUploaded')}</Text>
 
           {!hasRecentSection ? (
             <View style={styles.emptyCard}>
@@ -674,7 +685,7 @@ export default function HomeScreen() {
                 </View>
               </View>
               <Text style={styles.emptyBody}>
-                Tap + to add your first meal.
+                {t('home.firstMeal')}
               </Text>
             </View>
           ) : (

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -14,15 +14,16 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MealPlanCard } from '@/components/MealPlanCard';
 import { RecipeCard } from '@/components/RecipeCard';
 import { useAuth } from '@/context/AuthContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { colors } from '@/constants/theme';
 import { saveRecipe } from '@/lib/firestore';
 import { generateMealPlan, generateRecipe, isGeminiConfigured } from '@/lib/gemini';
 import { exportMealPlanPdf } from '@/lib/mealPlanPdf';
 import {
   PLANNER_QUESTIONS,
-  weekdaysStartingFrom,
   type MealPlan,
 } from '@/types/mealPlan';
+import type { MessageKey } from '@/lib/i18n';
 import {
   DIET_OPTIONS,
   INGREDIENT_PRESETS,
@@ -35,6 +36,18 @@ import {
 } from '@/types/recipe';
 
 const MODE_OPTIONS = ['Meal plan', 'Recipe'] as const;
+const PLANNER_KEYS = [
+  'planner.skill',
+  'planner.time',
+  'planner.allergies',
+  'planner.goal',
+  'planner.people',
+  'planner.seasonal',
+  'planner.prep',
+  'planner.budget',
+  'planner.cuisine',
+  'planner.snacks',
+] as const satisfies readonly MessageKey[];
 const SERVING_LABELS = SERVING_OPTIONS.map(String);
 const CHAT_GUTTER = 16;
 
@@ -110,9 +123,9 @@ function markPromptAnswered(messages: ChatMessage[]): ChatMessage[] {
   return next;
 }
 
-function openingMessages(): ChatMessage[] {
+function openingMessages(greeting: string): ChatMessage[] {
   return [
-    assistantText('Hi, what do you want to create?', MODE_OPTIONS),
+    assistantText(greeting, MODE_OPTIONS),
   ];
 }
 
@@ -158,9 +171,11 @@ function StreamingText({
 function OptionsCarousel({
   options,
   onSelect,
+  labelFor,
 }: {
   options: readonly string[];
   onSelect: (option: string) => void;
+  labelFor: (option: string) => string;
 }) {
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(8)).current;
@@ -201,7 +216,7 @@ function OptionsCarousel({
             style={styles.optionChip}
             onPress={() => onSelect(option)}
           >
-            <Text style={styles.optionChipText}>{option}</Text>
+            <Text style={styles.optionChipText}>{labelFor(option)}</Text>
           </Pressable>
         ))}
       </ScrollView>
@@ -211,12 +226,21 @@ function OptionsCarousel({
 
 export default function ChatScreen() {
   const { user } = useAuth();
+  const { t, to, language, locale } = useLanguage();
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
-  const startDays = weekdaysStartingFrom();
+  const startDays = useMemo(() => {
+    return Array.from({ length: 7 }, (_, offset) => {
+      const day = new Date();
+      day.setDate(day.getDate() + offset);
+      return day.toLocaleDateString(locale, { weekday: 'long' });
+    });
+  }, [locale]);
   const todayName = startDays[0];
 
-  const [messages, setMessages] = useState<ChatMessage[]>(openingMessages);
+  const [messages, setMessages] = useState<ChatMessage[]>(() =>
+    openingMessages(t('chat.hi')),
+  );
   const [pending, setPending] = useState<PendingPrompt>({ type: 'mode' });
   const [mode, setMode] = useState<'plan' | 'recipe' | null>(null);
   const [diet, setDiet] = useState<DietOption | null>(null);
@@ -257,7 +281,7 @@ export default function ChatScreen() {
     setError(null);
     setMessages((current) => [
       ...markPromptAnswered(current),
-      assistantText(`Got it. Building your 7-day plan starting ${todayName}…`),
+      assistantText(t('chat.gotItPlan', { day: todayName })),
     ]);
 
     try {
@@ -268,20 +292,18 @@ export default function ChatScreen() {
       setMealPlan(plan);
       setMessages((current) => [
         ...current,
-        assistantText("Here's your week:"),
+        assistantText(t('chat.heresWeek')),
         { id: nextId('plan'), role: 'assistant', kind: 'plan', plan },
-        assistantText(
-          'Want a PDF? Use Export at the top, or Restart to start over.',
-        ),
+        assistantText(t('chat.wantPdf')),
       ]);
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : 'Unable to generate meal plan.';
+        err instanceof Error ? err.message : t('chat.unablePlan');
       setError(message);
       setMessages((current) => [
         ...current,
-        assistantText(`I couldn't finish that plan: ${message}`),
-        assistantText('Tap Restart to try again.'),
+        assistantText(t('chat.couldntPlan', { error: message })),
+        assistantText(t('chat.tapRestart')),
       ]);
     } finally {
       setGenerating(false);
@@ -295,7 +317,7 @@ export default function ChatScreen() {
     setMessages((current) => [
       ...markPromptAnswered(current),
       userText(ingredient),
-      assistantText('Cooking something up…'),
+      assistantText(t('chat.cooking')),
     ]);
 
     try {
@@ -307,9 +329,9 @@ export default function ChatScreen() {
       );
       setMessages((current) => [
         ...current,
-        assistantText("Here's your recipe:"),
+        assistantText(t('chat.heresRecipe')),
         { id: nextId('recipe'), role: 'assistant', kind: 'recipe', recipe },
-        assistantText('Tap Restart to create something else.'),
+        assistantText(t('chat.tapRestartElse')),
       ]);
 
       if (user) {
@@ -318,19 +340,19 @@ export default function ChatScreen() {
         } catch (cloudErr) {
           setError(
             cloudErr instanceof Error
-              ? `Recipe ready, but cloud save failed: ${cloudErr.message}`
-              : 'Recipe ready, but cloud save failed.',
+              ? t('chat.cloudSaveFailedNamed', { error: cloudErr.message })
+              : t('chat.cloudSaveFailed'),
           );
         }
       }
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : 'Unable to generate recipe.';
+        err instanceof Error ? err.message : t('chat.unableRecipe');
       setError(message);
       setMessages((current) => [
         ...current,
-        assistantText(`I couldn't finish that recipe: ${message}`),
-        assistantText('Tap Restart to try again.'),
+        assistantText(t('chat.couldntRecipe', { error: message })),
+        assistantText(t('chat.tapRestart')),
       ]);
     } finally {
       setGenerating(false);
@@ -345,9 +367,9 @@ export default function ChatScreen() {
         setMode('plan');
         setMessages((current) => [
           ...markPromptAnswered(current),
-          userText(option),
+          userText(to(option)),
           assistantText(
-            `Great — I'll build a 7-day meal plan starting today (${todayName}). Any diet filter?`,
+            t('chat.dietFilterPlan', { day: todayName }),
             DIET_OPTIONS,
           ),
         ]);
@@ -358,8 +380,8 @@ export default function ChatScreen() {
       setMode('recipe');
       setMessages((current) => [
         ...markPromptAnswered(current),
-        userText(option),
-        assistantText('Any diet filter for this recipe?', DIET_OPTIONS),
+        userText(to(option)),
+        assistantText(t('chat.dietFilterRecipe'), DIET_OPTIONS),
       ]);
       setPending({ type: 'recipe-diet' });
       return;
@@ -370,9 +392,9 @@ export default function ChatScreen() {
       setDiet(selected);
       setMessages((current) => [
         ...markPromptAnswered(current),
-        userText(option),
+        userText(to(option)),
         assistantText(
-          PLANNER_QUESTIONS[0].question,
+          t(PLANNER_KEYS[0]),
           PLANNER_QUESTIONS[0].options,
         ),
       ]);
@@ -386,7 +408,7 @@ export default function ChatScreen() {
 
       const nextAnswers = [
         ...answers,
-        { question: question.question, answer: option },
+        { question: t(PLANNER_KEYS[pending.index]), answer: to(option) },
       ];
       setAnswers(nextAnswers);
 
@@ -395,8 +417,8 @@ export default function ChatScreen() {
         const nextQuestion = PLANNER_QUESTIONS[nextIndex];
         setMessages((current) => [
           ...markPromptAnswered(current),
-          userText(option),
-          assistantText(nextQuestion.question, nextQuestion.options),
+          userText(to(option)),
+          assistantText(t(PLANNER_KEYS[nextIndex]), nextQuestion.options),
         ]);
         setPending({ type: 'plan-question', index: nextIndex });
         return;
@@ -404,7 +426,7 @@ export default function ChatScreen() {
 
       setMessages((current) => [
         ...markPromptAnswered(current),
-        userText(option),
+        userText(to(option)),
       ]);
       void buildPlan(diet ?? 'None', nextAnswers);
       return;
@@ -414,8 +436,8 @@ export default function ChatScreen() {
       setRecipeDiet(option as DietOption);
       setMessages((current) => [
         ...markPromptAnswered(current),
-        userText(option),
-        assistantText('How should it be prepared?', PREPARATION_METHODS),
+        userText(to(option)),
+        assistantText(t('chat.howPrepared'), PREPARATION_METHODS),
       ]);
       setPending({ type: 'recipe-method' });
       return;
@@ -425,8 +447,8 @@ export default function ChatScreen() {
       setRecipeMethod(option as PreparationMethod);
       setMessages((current) => [
         ...markPromptAnswered(current),
-        userText(option),
-        assistantText('How many servings?', SERVING_LABELS),
+        userText(to(option)),
+        assistantText(t('chat.howServings'), SERVING_LABELS),
       ]);
       setPending({ type: 'recipe-servings' });
       return;
@@ -437,8 +459,8 @@ export default function ChatScreen() {
       setRecipeServings(servings);
       setMessages((current) => [
         ...markPromptAnswered(current),
-        userText(option),
-        assistantText('Pick a main ingredient focus:', INGREDIENT_PRESETS),
+        userText(to(option)),
+        assistantText(t('chat.pickIngredient'), INGREDIENT_PRESETS),
       ]);
       setPending({ type: 'recipe-ingredient' });
       return;
@@ -451,7 +473,7 @@ export default function ChatScreen() {
 
   function onRestart() {
     messageSeq = 0;
-    setMessages(openingMessages());
+    setMessages(openingMessages(t('chat.hi')));
     setPending({ type: 'mode' });
     setMode(null);
     setDiet(null);
@@ -466,6 +488,17 @@ export default function ChatScreen() {
     setStreamReadyIds({});
   }
 
+  const didApplyLanguage = useRef(false);
+  useEffect(() => {
+    if (!didApplyLanguage.current) {
+      didApplyLanguage.current = true;
+      return;
+    }
+    onRestart();
+    // Restart the scripted chat when the UI language changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [language]);
+
   async function onExportPdf() {
     if (!mealPlan || !diet) return;
     setError(null);
@@ -475,19 +508,19 @@ export default function ChatScreen() {
         plan: mealPlan,
         diet,
         answers: [
-          { question: 'Dietary filter', answer: diet },
+          { question: t('chat.dietaryFilter'), answer: to(diet) },
           ...answers,
         ],
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to export PDF.');
+      setError(err instanceof Error ? err.message : t('chat.unableExport'));
     } finally {
       setExporting(false);
     }
   }
 
   const typingLabel =
-    mode === 'recipe' ? 'Drafting your recipe…' : 'Drafting your plan…';
+    mode === 'recipe' ? t('chat.draftingRecipe') : t('chat.draftingPlan');
 
   return (
     <View style={[styles.flex, { paddingTop: insets.top }]}>
@@ -497,12 +530,12 @@ export default function ChatScreen() {
             style={[styles.headerButton, exporting && styles.buttonDisabled]}
             disabled={exporting}
             onPress={onExportPdf}
-            accessibilityLabel="Export PDF"
+            accessibilityLabel={t('chat.exportPdf')}
           >
             {exporting ? (
               <ActivityIndicator color={colors.text} />
             ) : (
-              <Text style={styles.headerButtonText}>Export PDF</Text>
+              <Text style={styles.headerButtonText}>{t('chat.exportPdf')}</Text>
             )}
           </Pressable>
         ) : (
@@ -512,7 +545,7 @@ export default function ChatScreen() {
           style={[styles.plusButton, generating && styles.buttonDisabled]}
           disabled={generating}
           onPress={onRestart}
-          accessibilityLabel="Start new chat"
+          accessibilityLabel={t('chat.newChat')}
         >
           <Ionicons name="add" size={22} color={colors.text} />
         </Pressable>
@@ -520,7 +553,7 @@ export default function ChatScreen() {
 
       {!isGeminiConfigured ? (
         <Text style={styles.notice}>
-          Add EXPO_PUBLIC_GEMINI_API_KEY to your .env file, then restart Expo.
+          {t('chat.geminiMissing')}
         </Text>
       ) : null}
 
@@ -585,6 +618,7 @@ export default function ChatScreen() {
                 <OptionsCarousel
                   options={message.options!}
                   onSelect={onSelectOption}
+                  labelFor={to}
                 />
               ) : null}
             </View>

@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { LanguageSheet } from '@/components/LanguageSheet';
 
 const CHEVRON_SIZE = 20;
@@ -22,6 +23,7 @@ const CHEVRON_COLOR = '#8A8A8A';
 
 export default function AccountScreen() {
   const { user, profile, loading, signOut, deleteAccount } = useAuth();
+  const { t } = useLanguage();
   const insets = useSafeAreaInsets();
   const [signingOut, setSigningOut] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -47,12 +49,12 @@ export default function AccountScreen() {
 
   function onDeleteAccount() {
     Alert.alert(
-      'Delete account?',
-      'This permanently removes your account and profile. This action cannot be undone.',
+      t('account.deleteTitle'),
+      t('account.deleteBody'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Delete',
+          text: t('common.delete'),
           style: 'destructive',
           onPress: async () => {
             setDeleting(true);
@@ -60,7 +62,7 @@ export default function AccountScreen() {
               await deleteAccount();
               router.replace('/onboarding' as Href);
             } catch {
-              Alert.alert('Unable to delete account', 'Please sign in again and try once more.');
+              Alert.alert(t('account.deleteFailed'), t('account.deleteFailedBody'));
             } finally {
               setDeleting(false);
             }
@@ -84,14 +86,14 @@ export default function AccountScreen() {
         <View style={styles.header}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Go back"
+            accessibilityLabel={t('common.back')}
             hitSlop={8}
             onPress={() => router.back()}
             style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
           >
             <Ionicons name="arrow-back" size={22} color={colors.text} />
           </Pressable>
-          <Text style={styles.pageTitle}>Profile</Text>
+          <Text style={styles.pageTitle}>{t('account.title')}</Text>
         </View>
 
         <Pressable
@@ -108,21 +110,21 @@ export default function AccountScreen() {
           </View>
           <View style={styles.identityText}>
             <Text numberOfLines={1} style={styles.name}>
-              {name || 'Tap to set name'}
+              {name || t('account.setName')}
             </Text>
             <Text numberOfLines={1} style={styles.email}>
-              {name && email ? email : 'and username'}
+              {name && email ? email : t('account.setUsername')}
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={CHEVRON_SIZE} color={CHEVRON_COLOR} />
         </Pressable>
 
-        <Text style={styles.sectionLabel}>Account</Text>
+        <Text style={styles.sectionLabel}>{t('account.section')}</Text>
         <View style={styles.menuCard}>
           <Pressable accessibilityRole="button" style={styles.menuRow}>
             <View style={styles.menuLeading}>
               <Ionicons name="id-card-outline" size={20} color={colors.text} />
-              <Text style={styles.menuText}>Personal Details</Text>
+              <Text style={styles.menuText}>{t('account.personalDetails')}</Text>
             </View>
             <Ionicons name="chevron-forward" size={CHEVRON_SIZE} color={CHEVRON_COLOR} />
           </Pressable>
@@ -134,13 +136,13 @@ export default function AccountScreen() {
           >
             <View style={styles.menuLeading}>
               <Ionicons name="language-outline" size={20} color={colors.text} />
-              <Text style={styles.menuText}>Language</Text>
+              <Text style={styles.menuText}>{t('account.language')}</Text>
             </View>
             <Ionicons name="chevron-forward" size={CHEVRON_SIZE} color={CHEVRON_COLOR} />
           </Pressable>
         </View>
 
-        <Text style={styles.sectionLabelSpaced}>Account Actions</Text>
+        <Text style={styles.sectionLabelSpaced}>{t('account.actions')}</Text>
         <View style={styles.menuCard}>
           <Pressable
             accessibilityRole="button"
@@ -150,7 +152,7 @@ export default function AccountScreen() {
           >
             <View style={styles.menuLeading}>
               <Ionicons name="log-out-outline" size={20} color={colors.text} />
-              <Text style={styles.menuText}>Logout</Text>
+              <Text style={styles.menuText}>{t('account.logout')}</Text>
             </View>
             {signingOut ? (
               <ActivityIndicator size="small" color={colors.text} />
@@ -167,7 +169,7 @@ export default function AccountScreen() {
           >
             <View style={styles.menuLeading}>
               <Ionicons name="person-remove-outline" size={20} color={colors.text} />
-              <Text style={styles.menuText}>Delete Account</Text>
+              <Text style={styles.menuText}>{t('account.deleteAccount')}</Text>
             </View>
             {deleting ? (
               <ActivityIndicator size="small" color={colors.text} />

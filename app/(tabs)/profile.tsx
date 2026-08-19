@@ -4,30 +4,33 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useAuth } from '@/context/AuthContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { colors } from '@/constants/theme';
 import { PageHeader } from '@/components/PageHeader';
+import type { MessageKey } from '@/lib/i18n';
 
 function formatWeightLbs(weightKg?: number | null) {
   if (weightKg == null || Number.isNaN(weightKg)) return '—';
   return `${Math.round(weightKg * 2.2046226218)} lbs`;
 }
 
-function bmiStatus(bmi?: number | null) {
-  if (bmi == null || Number.isNaN(bmi)) return { label: 'Unavailable', color: '#7D7D7D', tint: '#EEEEEE' };
-  if (bmi < 18.5) return { label: 'Underweight', color: '#5D8FD8', tint: '#EAF1FC' };
-  if (bmi < 25) return { label: 'Healthy', color: '#20A66A', tint: '#E7F6EF' };
-  if (bmi < 30) return { label: 'Overweight', color: '#DDAA59', tint: '#FBF2E3' };
-  return { label: 'Obese', color: '#D95F63', tint: '#FBEAEC' };
+function bmiStatus(bmi: number | null | undefined, t: (key: MessageKey) => string) {
+  if (bmi == null || Number.isNaN(bmi)) return { label: t('bmi.unavailable'), color: '#7D7D7D', tint: '#EEEEEE' };
+  if (bmi < 18.5) return { label: t('bmi.underweight'), color: '#5D8FD8', tint: '#EAF1FC' };
+  if (bmi < 25) return { label: t('bmi.healthy'), color: '#20A66A', tint: '#E7F6EF' };
+  if (bmi < 30) return { label: t('bmi.overweight'), color: '#DDAA59', tint: '#FBF2E3' };
+  return { label: t('bmi.obese'), color: '#D95F63', tint: '#FBEAEC' };
 }
 
 export default function ProfileScreen() {
   const { user, profile, loading } = useAuth();
+  const { t } = useLanguage();
   const insets = useSafeAreaInsets();
   const bmi = profile?.recommendation?.bmi;
   const onboarding = profile?.onboarding;
   const currentWeight = formatWeightLbs(onboarding?.weightKg);
   const goalWeight = formatWeightLbs(onboarding?.targetWeightKg ?? onboarding?.weightKg);
-  const status = bmiStatus(bmi);
+  const status = bmiStatus(bmi, t);
   const markerPosition = bmi == null ? 0 : Math.min(100, Math.max(0, ((bmi - 10) / 30) * 100));
 
   if (!loading && !user) {
@@ -39,40 +42,40 @@ export default function ProfileScreen() {
       style={styles.flex}
       contentContainerStyle={[styles.content, { paddingTop: insets.top + 8 }]}
     >
-      <PageHeader title="Progress" />
+      <PageHeader title={t('tabs.progress')} />
 
       <View style={styles.weightCard}>
         <View style={styles.weightHeadingRow}>
           <View>
-            <Text style={styles.weightLabel}>Current Weight</Text>
+            <Text style={styles.weightLabel}>{t('progress.currentWeight')}</Text>
             <Text style={styles.currentWeight}>{currentWeight}</Text>
           </View>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Log weight"
+            accessibilityLabel={t('progress.logWeight')}
             style={styles.logWeightButton}
           >
-            <Text style={styles.logWeightText}>Log weight</Text>
+            <Text style={styles.logWeightText}>{t('progress.logWeight')}</Text>
             <Ionicons name="arrow-forward" size={15} color={colors.buttonPrimaryText} />
           </Pressable>
         </View>
         <View style={styles.weightTrack} />
         <View style={styles.weightRangeRow}>
           <Text style={styles.weightRangeLabel}>
-            Start: <Text style={styles.weightRangeValue}>{currentWeight}</Text>
+            {t('progress.start')}: <Text style={styles.weightRangeValue}>{currentWeight}</Text>
           </Text>
           <Text style={styles.weightRangeLabel}>
-            Goal: <Text style={styles.weightRangeValue}>{goalWeight}</Text>
+            {t('progress.goal')}: <Text style={styles.weightRangeValue}>{goalWeight}</Text>
           </Text>
         </View>
       </View>
 
       <View style={styles.bmiCard}>
         <View style={styles.bmiHeadingRow}>
-          <Text style={styles.bmiTitle}>Your BMI</Text>
+          <Text style={styles.bmiTitle}>{t('progress.yourBmi')}</Text>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="BMI information"
+            accessibilityLabel={t('progress.bmiInfo')}
             onPress={() => router.push('/bmi-info' as Href)}
             hitSlop={10}
           >
@@ -81,7 +84,7 @@ export default function ProfileScreen() {
         </View>
         <View style={styles.bmiValueRow}>
           <Text style={styles.bmiValue}>{bmi != null ? bmi.toFixed(1) : '—'}</Text>
-          <Text style={styles.bmiMessage}>Your weight is</Text>
+          <Text style={styles.bmiMessage}>{t('progress.yourWeightIs')}</Text>
           <View style={[styles.statusPill, { backgroundColor: status.tint }]}>
             <Text style={[styles.statusText, { color: status.color }]}>{status.label}</Text>
           </View>
@@ -94,14 +97,14 @@ export default function ProfileScreen() {
           {bmi != null ? <View style={[styles.bmiMarker, { left: `${markerPosition}%` }]} /> : null}
         </View>
         <View style={styles.bmiLegend}>
-          <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: '#6595D8' }]} /><Text style={styles.legendText}>Underweight{`\n`}{'<18.5'}</Text></View>
-          <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: '#20A66A' }]} /><Text style={styles.legendText}>Healthy{`\n`}18.5–24.9</Text></View>
-          <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: '#E3B66F' }]} /><Text style={styles.legendText}>Overweight{`\n`}25.0–29.9</Text></View>
-          <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: '#D96367' }]} /><Text style={styles.legendText}>Obese{`\n`}{'>30.0'}</Text></View>
+          <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: '#6595D8' }]} /><Text style={styles.legendText}>{t('bmi.underweight')}{`\n`}{'<18.5'}</Text></View>
+          <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: '#20A66A' }]} /><Text style={styles.legendText}>{t('bmi.healthy')}{`\n`}18.5–24.9</Text></View>
+          <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: '#E3B66F' }]} /><Text style={styles.legendText}>{t('bmi.overweight')}{`\n`}25.0–29.9</Text></View>
+          <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: '#D96367' }]} /><Text style={styles.legendText}>{t('bmi.obese')}{`\n`}{'>30.0'}</Text></View>
         </View>
       </View>
 
-      <Text style={styles.emptyProgress}>Keep logging meals to see your progress here.</Text>
+      <Text style={styles.emptyProgress}>{t('progress.empty')}</Text>
     </ScrollView>
   );
 }

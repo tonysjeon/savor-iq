@@ -10,23 +10,20 @@ import {
   Text,
   View,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors } from '@/constants/theme';
-
-const LANGUAGE_STORAGE_KEY = 'savor-iq.language';
+import { useLanguage } from '@/context/LanguageContext';
+import { LANGUAGE_NATIVE_NAMES, type LanguageId } from '@/lib/i18n';
 
 export const LANGUAGES = [
-  { id: 'en' as const, label: 'English', flag: '🇺🇸' },
-  { id: 'fr' as const, label: 'French', flag: '🇫🇷' },
-  { id: 'es' as const, label: 'Spanish', flag: '🇪🇸' },
-  { id: 'ko' as const, label: 'Korean', flag: '🇰🇷' },
-  { id: 'it' as const, label: 'Italian', flag: '🇮🇹' },
+  { id: 'en' as const, flag: '🇺🇸' },
+  { id: 'fr' as const, flag: '🇫🇷' },
+  { id: 'es' as const, flag: '🇪🇸' },
+  { id: 'ko' as const, flag: '🇰🇷' },
+  { id: 'it' as const, flag: '🇮🇹' },
 ];
-
-export type LanguageId = (typeof LANGUAGES)[number]['id'];
 
 export function LanguageSheet({
   visible,
@@ -35,7 +32,7 @@ export function LanguageSheet({
   visible: boolean;
   onClose: () => void;
 }) {
-  const [selectedId, setSelectedId] = useState<LanguageId>('en');
+  const { language: selectedId, setLanguage, t } = useLanguage();
   const insets = useSafeAreaInsets();
   const screenHeight = Dimensions.get('window').height;
   const translateY = useRef(new Animated.Value(screenHeight)).current;
@@ -106,14 +103,6 @@ export function LanguageSheet({
   );
 
   useEffect(() => {
-    AsyncStorage.getItem(LANGUAGE_STORAGE_KEY).then((stored) => {
-      if (LANGUAGES.some((language) => language.id === stored)) {
-        setSelectedId(stored as LanguageId);
-      }
-    }).catch(() => {});
-  }, []);
-
-  useEffect(() => {
     if (!visible) return;
     setMounted(true);
     translateY.setValue(screenHeight);
@@ -126,12 +115,7 @@ export function LanguageSheet({
   }, [screenHeight, translateY, visible]);
 
   async function selectLanguage(id: LanguageId) {
-    setSelectedId(id);
-    try {
-      await AsyncStorage.setItem(LANGUAGE_STORAGE_KEY, id);
-    } catch {
-      // Keep the in-memory selection.
-    }
+    await setLanguage(id);
     animateClose();
   }
 
@@ -149,10 +133,10 @@ export function LanguageSheet({
           <View style={styles.handleArea} {...panResponder.panHandlers}>
             <View style={styles.handle} />
             <View style={styles.headerRow}>
-              <Text style={styles.title}>Select Language</Text>
+              <Text style={styles.title}>{t('account.languageTitle')}</Text>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Close"
+                accessibilityLabel={t('common.close')}
                 hitSlop={8}
                 onPress={() => animateClose()}
                 style={({ pressed }) => [styles.closeButton, pressed && styles.closeButtonPressed]}
@@ -174,7 +158,7 @@ export function LanguageSheet({
                   style={styles.row}
                 >
                   <Text style={styles.flag}>{language.flag}</Text>
-                  <Text style={styles.label}>{language.label}</Text>
+                  <Text style={styles.label}>{LANGUAGE_NATIVE_NAMES[language.id]}</Text>
                   {selected ? (
                     <View style={styles.check}>
                       <Ionicons name="checkmark" size={14} color="#FFFFFF" />
