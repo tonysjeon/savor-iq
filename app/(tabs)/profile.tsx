@@ -40,7 +40,7 @@ export default function ProfileScreen() {
   return (
     <ScrollView
       style={styles.flex}
-      contentContainerStyle={[styles.content, { paddingTop: insets.top + 8 }]}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}
     >
       <PageHeader title={t('tabs.progress')} />
 

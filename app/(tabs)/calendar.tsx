@@ -51,6 +51,8 @@ const MACRO_COLORS = {
   sodium: '#90A4AE',
 } as const;
 
+const TAB_BAR_HEIGHT = 78;
+
 const DAILY_GOALS = {
   calories: 2000,
   protein: 150,
@@ -279,7 +281,13 @@ export default function CalendarScreen() {
   return (
     <ScrollView
       style={styles.flex}
-      contentContainerStyle={[styles.content, { paddingTop: insets.top + 8 }]}
+      contentContainerStyle={[
+        styles.content,
+        {
+          paddingTop: insets.top + 12,
+          paddingBottom: TAB_BAR_HEIGHT + Math.max(insets.bottom, 12) + 6,
+        },
+      ]}
     >
       <PageHeader title={t('tabs.calendar')} />
       <View style={styles.calendarCard}>
@@ -571,7 +579,6 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 20,
     paddingTop: 12,
-    paddingBottom: 40,
     backgroundColor: colors.page,
   },
   header: {

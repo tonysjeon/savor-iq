@@ -906,8 +906,8 @@ async function buildSuggestions(nextDiet: string, nextCuisine: string) {
       contentContainerStyle={[
         styles.pageContent,
         {
-          paddingTop: insets.top + 8,
-          paddingBottom: tabClearance + 16,
+          paddingTop: insets.top + 12,
+          paddingBottom: tabClearance + 6,
         },
       ]}
       keyboardShouldPersistTaps="handled"
