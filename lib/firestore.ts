@@ -14,24 +14,47 @@ import {
 import { getDownloadURL, ref, uploadString } from 'firebase/storage';
 
 import { db, storage } from '@/lib/firebase';
+import type { ExerciseIntensity, TimedExerciseKind } from '@/lib/exerciseCalories';
 import {
   prependCachedAnalysis,
+  prependCachedExercise,
   prependCachedRecipe,
   removeCachedAnalysis,
+  removeCachedExercise,
   setCachedAnalyses,
+  setCachedExercises,
   setCachedRecipes,
   getHistoryCacheSync,
   mergeAnalysesWithPending,
   dedupeAnalyses,
 } from '@/lib/userHistoryCache';
+import type { NutritionRecommendation, OnboardingProfile } from '@/lib/onboarding';
 import type { NutritionInfo } from '@/types/nutrition';
 import type { Recipe } from '@/types/recipe';
-import type { NutritionRecommendation, OnboardingProfile } from '@/lib/onboarding';
 
 export type SavedRecipe = Recipe & { id: string };
 export type SavedNutrition = NutritionInfo & {
   id: string;
   createdAt: number | null;
+};
+
+export type ExerciseSource = 'describe' | 'manual' | TimedExerciseKind;
+
+export type SavedExercise = {
+  id: string;
+  activity: string;
+  calories: number;
+  durationMinutes: number;
+  intensity: ExerciseIntensity;
+  summary: string;
+  description: string;
+  createdAt: number;
+  source: ExerciseSource;
+};
+
+export type SaveExerciseOptions = {
+  /** When true, write Firestore only — caller updates local cache after UI handoff. */
+  skipCache?: boolean;
 };
 
 export type SavedUserProfile = {
@@ -152,6 +175,53 @@ function parseNutrition(
     imageUrl: typeof data.imageUrl === 'string' ? data.imageUrl : undefined,
     createdAt:
       toMillis(data.createdAtMs) ?? toMillis(data.createdAt),
+  };
+}
+
+function parseExerciseSource(value: unknown): ExerciseSource | null {
+  if (value === 'describe' || value === 'manual' || value === 'run' || value === 'weights') {
+    return value;
+  }
+  return null;
+}
+
+function parseExerciseIntensity(value: unknown): ExerciseIntensity {
+  if (value === 'high' || value === 'medium' || value === 'low') return value;
+  return 'medium';
+}
+
+function parseExercise(
+  id: string,
+  data: Record<string, unknown>,
+): SavedExercise | null {
+  const source = parseExerciseSource(data.source);
+  const createdAt = toMillis(data.createdAtMs) ?? toMillis(data.createdAt);
+  if (!source || createdAt == null) return null;
+
+  const calories = typeof data.calories === 'number' ? data.calories : 0;
+  const activity =
+    typeof data.activity === 'string'
+      ? data.activity
+      : source === 'run'
+        ? 'Run'
+        : source === 'weights'
+          ? 'Weight lifting'
+          : source === 'manual'
+            ? 'Manual'
+            : 'Exercise';
+
+  return {
+    id,
+    activity,
+    calories,
+    durationMinutes:
+      typeof data.durationMinutes === 'number' ? data.durationMinutes : 0,
+    intensity: parseExerciseIntensity(data.intensity),
+    summary: typeof data.summary === 'string' ? data.summary : '',
+    description:
+      typeof data.description === 'string' ? data.description : activity,
+    createdAt,
+    source,
   };
 }
 
@@ -343,5 +413,80 @@ export async function listNutritionAnalyses(
   const existing = getHistoryCacheSync(uid)?.analyses;
   const merged = dedupeAnalyses(mergeAnalysesWithPending(analyses, existing));
   await setCachedAnalyses(uid, merged);
+  return merged;
+}
+
+export async function saveExercise(
+  uid: string,
+  exercise: SavedExercise,
+  options: SaveExerciseOptions = {},
+): Promise<string> {
+  const firestore = requireDb();
+  const createdAtMs = exercise.createdAt || Date.now();
+  const payload = {
+    activity: exercise.activity,
+    calories: exercise.calories,
+    durationMinutes: exercise.durationMinutes,
+    intensity: exercise.intensity,
+    summary: exercise.summary,
+    description: exercise.description,
+    source: exercise.source,
+    createdAt: serverTimestamp(),
+    createdAtMs,
+  };
+
+  const docRef = await addDoc(
+    collection(firestore, 'users', uid, 'exercises'),
+    payload,
+  );
+  if (!options.skipCache) {
+    await prependCachedExercise(uid, { ...exercise, id: docRef.id, createdAt: createdAtMs });
+  }
+  return docRef.id;
+}
+
+export async function deleteExercise(
+  uid: string,
+  exerciseId: string,
+): Promise<void> {
+  const firestore = requireDb();
+  if (!exerciseId.startsWith('exercise-') && !exerciseId.startsWith('processing-')) {
+    await deleteDoc(doc(firestore, 'users', uid, 'exercises', exerciseId));
+  }
+  await removeCachedExercise(uid, exerciseId);
+}
+
+export async function listExercises(
+  uid: string,
+  max = 20,
+): Promise<SavedExercise[]> {
+  const firestore = requireDb();
+  const snapshot = await getDocs(
+    query(
+      collection(firestore, 'users', uid, 'exercises'),
+      orderBy('createdAt', 'desc'),
+      limit(max),
+    ),
+  );
+
+  const exercises = snapshot.docs
+    .map((item) => parseExercise(item.id, item.data() as Record<string, unknown>))
+    .filter((item): item is SavedExercise => item !== null);
+
+  const existing = getHistoryCacheSync(uid)?.exercises ?? [];
+  const existingIds = new Set(exercises.map((item) => item.id));
+  const keepLocal = existing.filter(
+    (item) =>
+      item.id.startsWith('exercise-') &&
+      !existingIds.has(item.id) &&
+      !exercises.some(
+        (saved) =>
+          saved.source === item.source &&
+          saved.calories === item.calories &&
+          Math.abs(saved.createdAt - item.createdAt) < 120_000,
+      ),
+  );
+  const merged = [...keepLocal, ...exercises].sort((a, b) => b.createdAt - a.createdAt);
+  await setCachedExercises(uid, merged);
   return merged;
 }

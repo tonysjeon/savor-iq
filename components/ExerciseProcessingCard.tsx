@@ -123,9 +123,18 @@ function ExerciseThumb({
   iconId: ExerciseOptionId;
 }) {
   const percentage = Math.min(100, Math.max(0, Math.round(progress)));
-  const overlayOpacity = useRef(new Animated.Value(1)).current;
+  const overlayOpacity = useRef(new Animated.Value(percentage >= 100 ? 0 : 1)).current;
+  const previousPercentage = useRef(percentage);
 
   useEffect(() => {
+    const alreadyComplete =
+      percentage >= 100 && previousPercentage.current >= 100;
+    previousPercentage.current = percentage;
+    if (alreadyComplete) {
+      overlayOpacity.setValue(0);
+      return;
+    }
+
     Animated.timing(overlayOpacity, {
       toValue: percentage >= 100 ? 0 : 1,
       duration: percentage >= 100 ? 180 : 100,
@@ -138,11 +147,11 @@ function ExerciseThumb({
       <View style={styles.iconCircle}>
         <ExerciseOptionIcon id={iconId} size={28} />
       </View>
-      <Animated.View
-        style={[styles.progressFocus, { opacity: overlayOpacity }]}
-        pointerEvents="none"
-      >
-        {percentage < 100 ? (
+      {percentage < 100 ? (
+        <Animated.View
+          style={[styles.progressFocus, { opacity: overlayOpacity }]}
+          pointerEvents="none"
+        >
           <ProgressRing
             size={58}
             strokeWidth={6}
@@ -153,8 +162,8 @@ function ExerciseThumb({
           >
             <Text style={styles.progressText}>{percentage}%</Text>
           </ProgressRing>
-        ) : null}
-      </Animated.View>
+        </Animated.View>
+      ) : null}
     </View>
   );
 }

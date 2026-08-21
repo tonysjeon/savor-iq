@@ -387,21 +387,27 @@ export function LogTimedExerciseScreen({
             </Pressable>
           </View>
         ) : (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t('exercise.continue')}
-            disabled={!canContinue}
-            onPress={() => {
-              void continueToEstimate();
-            }}
+          <View
             style={[
-              styles.continueButton,
-              { marginBottom: Math.max(insets.bottom, 16) },
-              !canContinue && styles.continueDisabled,
+              styles.doneBar,
+              { paddingBottom: Math.max(insets.bottom, 12) },
             ]}
           >
-            <Text style={styles.continueText}>{t('exercise.continue')}</Text>
-          </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('exercise.continue')}
+              disabled={!canContinue}
+              onPress={() => {
+                void continueToEstimate();
+              }}
+              style={[
+                styles.continueButton,
+                !canContinue && styles.continueDisabled,
+              ]}
+            >
+              <Text style={styles.continueText}>{t('exercise.continue')}</Text>
+            </Pressable>
+          </View>
         )}
 
         {editingDuration ? (
@@ -656,7 +662,7 @@ const styles = StyleSheet.create({
   continueText: {
     color: colors.buttonPrimaryText,
     fontSize: 17,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   keypad: {
     backgroundColor: '#D8D8DC',

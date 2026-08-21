@@ -1,10 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import type { SavedNutrition, SavedRecipe } from '@/lib/firestore';
+import type { SavedExercise, SavedNutrition, SavedRecipe } from '@/lib/firestore';
 
 type HistoryCache = {
   recipes: SavedRecipe[];
   analyses: SavedNutrition[];
+  exercises: SavedExercise[];
   updatedAt: number;
 };
 
@@ -18,7 +19,7 @@ function storageKey(uid: string) {
 }
 
 function emptyCache(): HistoryCache {
-  return { recipes: [], analyses: [], updatedAt: 0 };
+  return { recipes: [], analyses: [], exercises: [], updatedAt: 0 };
 }
 
 function notifyHistory(uid: string) {
@@ -44,12 +45,18 @@ export async function loadHistoryCache(uid: string): Promise<HistoryCache | null
   try {
     const raw = await AsyncStorage.getItem(storageKey(uid));
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as HistoryCache;
+    const parsed = JSON.parse(raw) as Partial<HistoryCache>;
     if (!parsed || !Array.isArray(parsed.recipes) || !Array.isArray(parsed.analyses)) {
       return null;
     }
-    memory.set(uid, parsed);
-    return parsed;
+    const cache: HistoryCache = {
+      recipes: parsed.recipes,
+      analyses: parsed.analyses,
+      exercises: Array.isArray(parsed.exercises) ? parsed.exercises : [],
+      updatedAt: typeof parsed.updatedAt === 'number' ? parsed.updatedAt : 0,
+    };
+    memory.set(uid, cache);
+    return cache;
   } catch {
     return null;
   }
@@ -63,6 +70,7 @@ export async function saveHistoryCache(
   const merged: HistoryCache = {
     recipes: next.recipes ?? current.recipes,
     analyses: next.analyses ?? current.analyses,
+    exercises: next.exercises ?? current.exercises,
     updatedAt: Date.now(),
   };
   memory.set(uid, merged);
@@ -96,6 +104,13 @@ export async function setCachedAnalyses(
   analyses: SavedNutrition[],
 ): Promise<void> {
   await saveHistoryCache(uid, { analyses });
+}
+
+export async function setCachedExercises(
+  uid: string,
+  exercises: SavedExercise[],
+): Promise<void> {
+  await saveHistoryCache(uid, { exercises });
 }
 
 /** Stable-ish key so a local pending meal can match its cloud copy. */
@@ -211,5 +226,29 @@ export async function removeCachedAnalysis(
   await setCachedAnalyses(
     uid,
     current.analyses.filter((item) => item.id !== analysisId),
+  );
+}
+
+export async function prependCachedExercise(
+  uid: string,
+  exercise: SavedExercise,
+  max = 100,
+): Promise<void> {
+  const current = (await loadHistoryCache(uid)) ?? emptyCache();
+  const exercises = [
+    exercise,
+    ...current.exercises.filter((item) => item.id !== exercise.id),
+  ].slice(0, max);
+  await setCachedExercises(uid, exercises);
+}
+
+export async function removeCachedExercise(
+  uid: string,
+  exerciseId: string,
+): Promise<void> {
+  const current = (await loadHistoryCache(uid)) ?? emptyCache();
+  await setCachedExercises(
+    uid,
+    current.exercises.filter((item) => item.id !== exerciseId),
   );
 }

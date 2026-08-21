@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 import { Animated, Easing, StyleSheet, View, type ViewStyle } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 
+import { colors } from '@/constants/theme';
+
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 type ProgressRingProps = {
@@ -22,7 +24,7 @@ export function ProgressRing({
   strokeWidth,
   progress,
   color,
-  trackColor = '#E8E8E8',
+  trackColor = colors.progressTrack,
   children,
   style,
   animationDuration = 500,

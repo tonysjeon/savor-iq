@@ -8,7 +8,6 @@ const BASE_SIZE = 62;
 const BASE_STROKE = 5;
 const BASE_INNER = 24;
 const BASE_FLAME = 13;
-const TRACK_COLOR = '#EEF1F7';
 const INNER_COLOR = '#F8F8FA';
 
 export function CalorieFlameRing({
@@ -32,7 +31,7 @@ export function CalorieFlameRing({
       strokeWidth={strokeWidth}
       progress={0.5}
       color={colors.text}
-      trackColor={TRACK_COLOR}
+      trackColor={colors.progressTrack}
       animated={false}
     >
       <View style={[styles.inner, { width: inner, height: inner, borderRadius: inner / 2 }]}>

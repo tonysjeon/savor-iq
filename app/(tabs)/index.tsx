@@ -26,7 +26,9 @@ import { useLanguage } from '@/context/LanguageContext';
 import { colors } from '@/constants/theme';
 import type { MessageKey } from '@/lib/i18n';
 import {
+  listExercises,
   listNutritionAnalyses,
+  type SavedExercise,
   type SavedNutrition,
 } from '@/lib/firestore';
 import {
@@ -37,6 +39,7 @@ import {
 } from '@/lib/mealAnalysisQueue';
 import {
   listExerciseEstimateJobs,
+  pruneReadyExerciseJobs,
   subscribeExerciseEstimateJobs,
   type ExerciseEstimateJob,
 } from '@/lib/exerciseEstimateQueue';
@@ -161,6 +164,7 @@ export default function HomeScreen() {
   const today = useMemo(() => new Date(), []);
   const [selectedDay, setSelectedDay] = useState(() => today);
   const [analyses, setAnalyses] = useState<SavedNutrition[]>([]);
+  const [exercises, setExercises] = useState<SavedExercise[]>([]);
   const [processingJobs, setProcessingJobs] = useState<MealAnalysisJob[]>([]);
   const [exerciseJobs, setExerciseJobs] = useState<ExerciseEstimateJob[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -178,12 +182,19 @@ export default function HomeScreen() {
         err instanceof Error ? err.message : 'Could not load meal history.',
       );
     }
+    try {
+      const nextExercises = await listExercises(uid, 100);
+      setExercises(nextExercises);
+    } catch {
+      // Local cache still shows workouts if Firestore rules lag behind.
+    }
   }, []);
 
   const applyCache = useCallback((uid: string) => {
     const syncCache = getHistoryCacheSync(uid);
     if (syncCache) {
       setAnalyses(dedupeAnalyses(syncCache.analyses));
+      setExercises(syncCache.exercises ?? []);
     }
   }, []);
 
@@ -216,6 +227,11 @@ export default function HomeScreen() {
   }, [analyses]);
 
   useEffect(() => {
+    const savedIds = new Set(exercises.map((item) => item.id));
+    pruneReadyExerciseJobs(savedIds);
+  }, [exercises]);
+
+  useEffect(() => {
     let active = true;
     void getTodayWaterMl().then((ml) => {
       if (active) setWaterIntake(ml);
@@ -231,6 +247,7 @@ export default function HomeScreen() {
     useCallback(() => {
       if (!user) {
         setAnalyses([]);
+        setExercises([]);
         return;
       }
       const uid = user.uid;
@@ -242,6 +259,7 @@ export default function HomeScreen() {
         if (!active) return;
         if (disk) {
           setAnalyses(dedupeAnalyses(disk.analyses));
+          setExercises(disk.exercises ?? []);
         }
 
         await refreshFromNetwork(uid);
@@ -287,11 +305,36 @@ export default function HomeScreen() {
       createdAt: job.createdAt,
       job,
     }));
-    const exercises = exerciseJobs.map((job) => ({
+    const visibleExerciseJobs = exerciseJobs.filter(
+      (job) => !user || !job.userId || job.userId === user.uid,
+    );
+    const exerciseJobIds = new Set(
+      visibleExerciseJobs.flatMap((job) => {
+        const ids = [job.id];
+        if (job.result?.id) ids.push(job.result.id);
+        return ids;
+      }),
+    );
+    const exerciseFromJobs = visibleExerciseJobs.map((job) => ({
       kind: 'exercise' as const,
       createdAt: job.createdAt,
       job,
     }));
+    const exerciseHistory = exercises
+      .filter((item) => !exerciseJobIds.has(item.id))
+      .map((item) => ({
+        kind: 'exercise' as const,
+        createdAt: item.createdAt,
+        job: {
+          id: item.id,
+          status: 'ready' as const,
+          description: item.description,
+          userId: user?.uid ?? null,
+          createdAt: item.createdAt,
+          progress: 100,
+          result: item,
+        },
+      }));
     const history = analyses
       .filter((item) => {
         if (jobResultIds.has(item.id)) return false;
@@ -309,10 +352,10 @@ export default function HomeScreen() {
         item,
       }));
 
-    return [...meals, ...exercises, ...history]
+    return [...meals, ...exerciseFromJobs, ...exerciseHistory, ...history]
       .sort((a, b) => b.createdAt - a.createdAt)
       .slice(0, RECENT_UPLOAD_LIMIT);
-  }, [analyses, exerciseJobs, processingJobs]);
+  }, [analyses, exerciseJobs, exercises, processingJobs, user]);
   const hasRecentSection = recentItems.length > 0;
 
   const caloriesEaten = Math.round(dayTotals.calories);
@@ -442,7 +485,7 @@ export default function HomeScreen() {
                       strokeWidth={11}
                       progress={calorieProgress}
                       color={colors.text}
-                      trackColor={colors.surfaceElevated}
+                      trackColor={colors.progressTrack}
                     >
                       <Ionicons name="flame" size={22} color={colors.text} />
                     </ProgressRing>
@@ -489,7 +532,7 @@ export default function HomeScreen() {
                             strokeWidth={7}
                             progress={eaten / goal}
                             color={macro.color}
-                            trackColor={colors.surfaceElevated}
+                            trackColor={colors.progressTrack}
                             style={styles.macroRing}
                           >
                             {macro.key === 'fat' ? (
@@ -532,7 +575,7 @@ export default function HomeScreen() {
                         strokeWidth={7}
                         progress={avgHealthScore / 10}
                         color="#66BB6A"
-                        trackColor={colors.surfaceElevated}
+                        trackColor={colors.progressTrack}
                         style={styles.macroRing}
                       >
                         <MaterialCommunityIcons
@@ -554,7 +597,7 @@ export default function HomeScreen() {
                         strokeWidth={7}
                         progress={waterIntake / DAILY_GOALS.water}
                         color="#42A5F5"
-                        trackColor={colors.surfaceElevated}
+                        trackColor={colors.progressTrack}
                         style={styles.macroRing}
                       >
                         <MaterialCommunityIcons
@@ -605,7 +648,7 @@ export default function HomeScreen() {
                         strokeWidth={7}
                         progress={dayTotals.fiber / DAILY_GOALS.fiber}
                         color="#64B5F6"
-                        trackColor={colors.surfaceElevated}
+                        trackColor={colors.progressTrack}
                         style={styles.macroRing}
                       >
                         <MaterialCommunityIcons
@@ -651,7 +694,7 @@ export default function HomeScreen() {
                         strokeWidth={7}
                         progress={sugarIntake / DAILY_GOALS.sugar}
                         color="#F48FB1"
-                        trackColor={colors.surfaceElevated}
+                        trackColor={colors.progressTrack}
                         style={styles.macroRing}
                       >
                         <MaterialCommunityIcons
@@ -699,7 +742,7 @@ export default function HomeScreen() {
                         strokeWidth={7}
                         progress={sodiumIntake / DAILY_GOALS.sodium}
                         color="#90A4AE"
-                        trackColor={colors.surfaceElevated}
+                        trackColor={colors.progressTrack}
                         style={styles.macroRing}
                       >
                         <MaterialCommunityIcons
@@ -738,7 +781,12 @@ export default function HomeScreen() {
             <>
               {recentItems.map((item) => {
                 if (item.kind === 'exercise') {
-                  return <ExerciseProcessingCard key={item.job.id} job={item.job} />;
+                  return (
+                    <ExerciseProcessingCard
+                      key={`exercise-${item.job.result?.createdAt ?? item.job.createdAt}`}
+                      job={item.job}
+                    />
+                  );
                 }
                 if (item.kind === 'meal-job') {
                   return <MealProcessingCard key={item.job.id} job={item.job} />;

@@ -1,19 +1,19 @@
 import type { ExerciseIntensity, TimedExerciseKind } from '@/lib/exerciseCalories';
 import {
+  deleteExercise,
+  saveExercise,
+  type ExerciseSource,
+  type SavedExercise,
+} from '@/lib/firestore';
+import {
   estimateExerciseCalories,
   type ExerciseEstimate,
 } from '@/lib/gemini';
 import { getOnboardingDraft } from '@/lib/onboarding';
+import { prependCachedExercise, removeCachedExercise } from '@/lib/userHistoryCache';
 
+export type { ExerciseSource, SavedExercise };
 export type ExerciseEstimateJobStatus = 'processing' | 'ready' | 'error';
-export type ExerciseSource = 'describe' | 'manual' | TimedExerciseKind;
-
-export type SavedExercise = ExerciseEstimate & {
-  id: string;
-  description: string;
-  createdAt: number;
-  source: ExerciseSource;
-};
 
 export type ExerciseEstimateJob = {
   id: string;
@@ -52,6 +52,21 @@ export function listExerciseEstimateJobs(): ExerciseEstimateJob[] {
   return [...jobs.values()].sort((a, b) => b.createdAt - a.createdAt);
 }
 
+export function pruneReadyExerciseJobs(savedIds: Set<string>): void {
+  let changed = false;
+  for (const [id, job] of jobs) {
+    const resultId = job.result?.id;
+    if (
+      job.status === 'ready' &&
+      (savedIds.has(id) || (resultId != null && savedIds.has(resultId)))
+    ) {
+      jobs.delete(id);
+      changed = true;
+    }
+  }
+  if (changed) notify();
+}
+
 export function dismissExerciseEstimate(id: string) {
   jobs.delete(id);
   notify();
@@ -86,6 +101,17 @@ export function enqueueManualExercise(params: {
   const id = `exercise-${Date.now()}`;
   const createdAt = Date.now();
   const calories = Math.max(1, Math.round(params.calories));
+  const result: SavedExercise = {
+    id,
+    activity: 'Manual',
+    calories,
+    durationMinutes: 0,
+    intensity: 'medium',
+    summary: '',
+    description: `${calories} cal`,
+    createdAt,
+    source: 'manual',
+  };
   setJob({
     id,
     status: 'ready',
@@ -93,18 +119,9 @@ export function enqueueManualExercise(params: {
     userId: params.userId,
     createdAt,
     progress: 100,
-    result: {
-      id,
-      activity: 'Manual',
-      calories,
-      durationMinutes: 0,
-      intensity: 'medium',
-      summary: '',
-      description: `${calories} cal`,
-      createdAt,
-      source: 'manual',
-    },
+    result,
   });
+  void persistExercise(id, result, params.userId);
   return id;
 }
 
@@ -120,6 +137,17 @@ export function enqueueTimedExercise(params: {
   const calories = Math.max(1, Math.round(params.calories));
   const durationMinutes = Math.max(1, Math.round(params.durationMinutes));
   const activity = params.kind === 'run' ? 'Run' : 'Weight lifting';
+  const result: SavedExercise = {
+    id,
+    activity,
+    calories,
+    durationMinutes,
+    intensity: params.intensity,
+    summary: '',
+    description: activity,
+    createdAt,
+    source: params.kind,
+  };
   setJob({
     id,
     status: 'ready',
@@ -127,19 +155,41 @@ export function enqueueTimedExercise(params: {
     userId: params.userId,
     createdAt,
     progress: 100,
-    result: {
-      id,
-      activity,
-      calories,
-      durationMinutes,
-      intensity: params.intensity,
-      summary: '',
-      description: activity,
-      createdAt,
-      source: params.kind,
-    },
+    result,
   });
+  void persistExercise(id, result, params.userId);
   return id;
+}
+
+async function persistExercise(
+  jobId: string,
+  result: SavedExercise,
+  userId: string | null,
+): Promise<void> {
+  if (!userId) return;
+
+  await prependCachedExercise(userId, result);
+  if (!jobs.has(jobId)) return;
+
+  try {
+    const docId = await saveExercise(userId, result, { skipCache: true });
+    if (!jobs.has(jobId)) {
+      await deleteExercise(userId, docId);
+      return;
+    }
+
+    const saved: SavedExercise = { ...result, id: docId };
+    const current = jobs.get(jobId);
+    if (current) {
+      setJob({ ...current, result: saved });
+    }
+    await prependCachedExercise(userId, saved);
+    if (docId !== jobId) {
+      await removeCachedExercise(userId, jobId);
+    }
+  } catch {
+    // Keep the local workout visible even if cloud write fails.
+  }
 }
 
 async function runJob(id: string): Promise<void> {
@@ -187,6 +237,7 @@ async function runJob(id: string): Promise<void> {
       result,
       progress: 100,
     });
+    await persistExercise(id, result, latest.userId);
   } catch (error) {
     if (!jobs.has(id)) return;
     const latest = jobs.get(id) ?? job;
