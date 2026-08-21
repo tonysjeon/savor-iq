@@ -20,6 +20,7 @@ import { AnimatedNumber } from '@/components/AnimatedNumber';
 import { ProgressRing } from '@/components/ProgressRing';
 import { MealProcessingCard } from '@/components/MealProcessingCard';
 import { MealHistoryCard } from '@/components/MealHistoryCard';
+import { ExerciseProcessingCard } from '@/components/ExerciseProcessingCard';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { colors } from '@/constants/theme';
@@ -34,6 +35,11 @@ import {
   subscribeMealAnalysisJobs,
   type MealAnalysisJob,
 } from '@/lib/mealAnalysisQueue';
+import {
+  listExerciseEstimateJobs,
+  subscribeExerciseEstimateJobs,
+  type ExerciseEstimateJob,
+} from '@/lib/exerciseEstimateQueue';
 import {
   getHistoryCacheSync,
   loadHistoryCache,
@@ -54,6 +60,8 @@ const WEEKDAY_KEYS = [
 ] as const;
 const CONTENT_GUTTER = 20;
 const SCREEN_WIDTH = Dimensions.get('window').width;
+const TAB_BAR_HEIGHT = 78;
+const RECENT_UPLOAD_LIMIT = 5;
 
 const DAILY_GOALS = {
   calories: 2000,
@@ -154,6 +162,7 @@ export default function HomeScreen() {
   const [selectedDay, setSelectedDay] = useState(() => today);
   const [analyses, setAnalyses] = useState<SavedNutrition[]>([]);
   const [processingJobs, setProcessingJobs] = useState<MealAnalysisJob[]>([]);
+  const [exerciseJobs, setExerciseJobs] = useState<ExerciseEstimateJob[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pagerPage, setPagerPage] = useState(0);
   const [showEaten, setShowEaten] = useState(false);
@@ -191,6 +200,13 @@ export default function HomeScreen() {
     setProcessingJobs(listMealAnalysisJobs());
     return subscribeMealAnalysisJobs(() => {
       setProcessingJobs(listMealAnalysisJobs());
+    });
+  }, []);
+
+  useEffect(() => {
+    setExerciseJobs(listExerciseEstimateJobs());
+    return subscribeExerciseEstimateJobs(() => {
+      setExerciseJobs(listExerciseEstimateJobs());
     });
   }, []);
 
@@ -254,11 +270,7 @@ export default function HomeScreen() {
     () => sumForDay(analyses, selectedDay),
     [analyses, selectedDay],
   );
-  const recentJobCards = useMemo(
-    () => processingJobs.slice(0, 10),
-    [processingJobs],
-  );
-  const recentMeals = useMemo(() => {
+  const recentItems = useMemo(() => {
     const jobResultIds = new Set(
       processingJobs
         .map((job) => job.result?.id)
@@ -270,12 +282,20 @@ export default function HomeScreen() {
         .filter((fp): fp is string => Boolean(fp)),
     );
 
-    return [...analyses]
+    const meals = processingJobs.map((job) => ({
+      kind: 'meal-job' as const,
+      createdAt: job.createdAt,
+      job,
+    }));
+    const exercises = exerciseJobs.map((job) => ({
+      kind: 'exercise' as const,
+      createdAt: job.createdAt,
+      job,
+    }));
+    const history = analyses
       .filter((item) => {
         if (jobResultIds.has(item.id)) return false;
         if (jobFingerprints.has(analysisFingerprint(item))) return false;
-
-        // Hide cloud rows that land while this job is still analyzing/saving.
         for (const job of processingJobs) {
           if (job.status !== 'processing') continue;
           if (item.createdAt == null) continue;
@@ -283,10 +303,17 @@ export default function HomeScreen() {
         }
         return true;
       })
-      .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
-      .slice(0, Math.max(0, 10 - recentJobCards.length));
-  }, [analyses, processingJobs, recentJobCards.length]);
-  const hasRecentSection = recentJobCards.length > 0 || recentMeals.length > 0;
+      .map((item) => ({
+        kind: 'meal-history' as const,
+        createdAt: item.createdAt ?? 0,
+        item,
+      }));
+
+    return [...meals, ...exercises, ...history]
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, RECENT_UPLOAD_LIMIT);
+  }, [analyses, exerciseJobs, processingJobs]);
+  const hasRecentSection = recentItems.length > 0;
 
   const caloriesEaten = Math.round(dayTotals.calories);
   const calorieBalance = goalBalance(caloriesEaten, DAILY_GOALS.calories);
@@ -309,7 +336,13 @@ export default function HomeScreen() {
   return (
     <ScrollView
       style={styles.flex}
-      contentContainerStyle={[styles.content, { paddingTop: insets.top + 8 }]}
+      contentContainerStyle={[
+        styles.content,
+        {
+          paddingTop: insets.top + 12,
+          paddingBottom: TAB_BAR_HEIGHT + Math.max(insets.bottom, 12) + 6,
+        },
+      ]}
       showsVerticalScrollIndicator={false}
     >
       <PageHeader title="SavorIQ" showIcon />
@@ -703,17 +736,22 @@ export default function HomeScreen() {
             </View>
           ) : (
             <>
-              {recentJobCards.map((job) => (
-                <MealProcessingCard key={job.id} job={job} />
-              ))}
-              {recentMeals.map((item) => (
-                <MealHistoryCard
-                  key={item.id}
-                  item={item}
-                  style={styles.recentMealCard}
-                  onPress={() => router.push(`/meal/${item.id}` as Href)}
-                />
-              ))}
+              {recentItems.map((item) => {
+                if (item.kind === 'exercise') {
+                  return <ExerciseProcessingCard key={item.job.id} job={item.job} />;
+                }
+                if (item.kind === 'meal-job') {
+                  return <MealProcessingCard key={item.job.id} job={item.job} />;
+                }
+                return (
+                  <MealHistoryCard
+                    key={item.item.id}
+                    item={item.item}
+                    style={styles.recentMealCard}
+                    onPress={() => router.push(`/meal/${item.item.id}` as Href)}
+                  />
+                );
+              })}
             </>
           )}
 
@@ -730,7 +768,6 @@ const styles = StyleSheet.create({
   content: {
     flexGrow: 1,
     paddingHorizontal: CONTENT_GUTTER,
-    paddingBottom: 40,
     backgroundColor: colors.page,
   },
   header: {

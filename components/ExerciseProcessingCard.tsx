@@ -2,32 +2,69 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Animated,
   Easing,
-  Image,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { router, type Href } from 'expo-router';
-import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
+import Svg, { Circle, Defs, LinearGradient, Line, Rect, Stop } from 'react-native-svg';
 
-import { AvocadoIcon } from '@/components/AvocadoIcon';
+import { ExerciseOptionIcon, type ExerciseOptionId } from '@/components/ExerciseOptionIcon';
 import { ProgressRing } from '@/components/ProgressRing';
 import { colors } from '@/constants/theme';
 import { useLanguage } from '@/context/LanguageContext';
-import type { MealAnalysisJob } from '@/lib/mealAnalysisQueue';
+import type { MessageKey } from '@/lib/i18n';
 import {
-  dismissMealAnalysis,
-  retryMealAnalysis,
-} from '@/lib/mealAnalysisQueue';
+  dismissExerciseEstimate,
+  retryExerciseEstimate,
+  type ExerciseEstimateJob,
+  type ExerciseSource,
+} from '@/lib/exerciseEstimateQueue';
 
-function formatMealTime(createdAt: number | null | undefined, locale: string): string {
-  if (createdAt == null) return '';
+const CARD_HEIGHT = 120;
+const LOG_ROUTES: Record<ExerciseSource, Href> = {
+  run: '/log-run',
+  weights: '/log-weights',
+  manual: '/log-manual',
+  describe: '/log-describe',
+};
+const INTENSITY_KEYS: Record<'high' | 'medium' | 'low', MessageKey> = {
+  high: 'exercise.high',
+  medium: 'exercise.medium',
+  low: 'exercise.low',
+};
+
+function formatTime(createdAt: number, locale: string): string {
   return new Date(createdAt).toLocaleTimeString(locale, {
     hour: 'numeric',
     minute: '2-digit',
   });
+}
+
+function IntensitySunIcon() {
+  const rays = [0, 45, 90, 135, 180, 225, 270, 315];
+  return (
+    <Svg width={14} height={14} viewBox="0 0 24 24">
+      {rays.map((deg) => {
+        const rad = (deg * Math.PI) / 180;
+        return (
+          <Line
+            key={deg}
+            x1={12 + Math.cos(rad) * 5.2}
+            y1={12 + Math.sin(rad) * 5.2}
+            x2={12 + Math.cos(rad) * 10.4}
+            y2={12 + Math.sin(rad) * 10.4}
+            stroke={colors.text}
+            strokeWidth={1.8}
+            strokeLinecap="round"
+          />
+        );
+      })}
+      <Circle cx={12} cy={12} r={2.15} fill={colors.text} />
+    </Svg>
+  );
 }
 
 function SkeletonBar({
@@ -60,7 +97,7 @@ function SkeletonBar({
         >
           <Svg width={measuredWidth} height={height}>
             <Defs>
-              <LinearGradient id="skeletonShimmer" x1="0" y1="0" x2="1" y2="0">
+              <LinearGradient id="exerciseSkeletonShimmer" x1="0" y1="0" x2="1" y2="0">
                 <Stop offset="0" stopColor="#FFFFFF" stopOpacity="0" />
                 <Stop offset="0.5" stopColor="#FFFFFF" stopOpacity="0.72" />
                 <Stop offset="1" stopColor="#FFFFFF" stopOpacity="0" />
@@ -69,7 +106,7 @@ function SkeletonBar({
             <Rect
               width={measuredWidth}
               height={height}
-              fill="url(#skeletonShimmer)"
+              fill="url(#exerciseSkeletonShimmer)"
             />
           </Svg>
         </Animated.View>
@@ -78,17 +115,12 @@ function SkeletonBar({
   );
 }
 
-function retakeFromAnalysisCard(jobId: string) {
-  dismissMealAnalysis(jobId);
-  router.push('/analyze' as Href);
-}
-
-function MealThumbnail({
-  uri,
+function ExerciseThumb({
   progress,
+  iconId,
 }: {
-  uri: string;
   progress: number;
+  iconId: ExerciseOptionId;
 }) {
   const percentage = Math.min(100, Math.max(0, Math.round(progress)));
   const overlayOpacity = useRef(new Animated.Value(1)).current;
@@ -103,7 +135,9 @@ function MealThumbnail({
 
   return (
     <View style={styles.thumbWrap}>
-      <Image source={{ uri }} style={styles.thumb} />
+      <View style={styles.iconCircle}>
+        <ExerciseOptionIcon id={iconId} size={28} />
+      </View>
       <Animated.View
         style={[styles.progressFocus, { opacity: overlayOpacity }]}
         pointerEvents="none"
@@ -125,14 +159,11 @@ function MealThumbnail({
   );
 }
 
-const CARD_HEIGHT = 120;
-
-export function MealProcessingCard({ job }: { job: MealAnalysisJob }) {
+export function ExerciseProcessingCard({ job }: { job: ExerciseEstimateJob }) {
   const { t, locale } = useLanguage();
   const pulse = useRef(new Animated.Value(0)).current;
   const [displayProgress, setDisplayProgress] = useState(job.progress);
   const isError = job.status === 'error';
-  const isRetakeError = isError && job.errorKind === 'food_not_detected';
   const isReady = job.status === 'ready' && job.result;
 
   useEffect(() => {
@@ -179,108 +210,78 @@ export function MealProcessingCard({ job }: { job: MealAnalysisJob }) {
     return () => clearInterval(interval);
   }, [isError, isReady, job.progress]);
 
-  // Keep the original capture as this card's preview to avoid swapping sources
-  // while the resized display image is prepared.
-  const imageUri = job.photo.uri;
-
   if (isReady && job.result) {
-    const meal = job.result;
-    const timeLabel = formatMealTime(meal.createdAt, locale);
+    const exercise = job.result;
+    const iconId: ExerciseOptionId =
+      exercise.source === 'run' ||
+      exercise.source === 'weights' ||
+      exercise.source === 'manual'
+        ? exercise.source
+        : 'describe';
+    const isManual = exercise.source === 'manual';
+    const title =
+      exercise.source === 'manual'
+        ? t('exercise.manual')
+        : exercise.source === 'run'
+          ? t('exercise.run')
+          : exercise.source === 'weights'
+            ? t('exercise.weights')
+            : exercise.activity;
+
     return (
       <Pressable
-        style={styles.card}
-        onPress={() => router.push(`/meal/${meal.id}` as Href)}
         accessibilityRole="button"
-        accessibilityLabel={t('meal.openNutrition', { name: meal.foodName })}
+        accessibilityLabel={title}
+        onPress={() => router.push(LOG_ROUTES[exercise.source])}
+        style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
       >
-        <MealThumbnail uri={imageUri} progress={displayProgress} />
+        <ExerciseThumb progress={displayProgress} iconId={iconId} />
         <View style={styles.body}>
           <View style={styles.titleRow}>
-            <Text style={styles.mealTitle} numberOfLines={1}>
-              {meal.foodName}
+            <Text style={styles.title} numberOfLines={1}>
+              {title}
             </Text>
-            {timeLabel ? <Text style={styles.mealTime}>{timeLabel}</Text> : null}
+            <Text style={styles.time}>{formatTime(exercise.createdAt, locale)}</Text>
           </View>
           <View style={styles.calorieRow}>
             <Ionicons name="flame" size={18} color={colors.text} />
-            <Text style={styles.mealCalories}>
-              {t('meal.calories', { count: Math.round(meal.calories) })}
+            <Text style={styles.calories}>
+              {t('meal.calories', { count: Math.round(exercise.calories) })}
             </Text>
           </View>
-          <View style={styles.macroRow}>
-            <View style={styles.macro}>
-              <MaterialCommunityIcons
-                name="food-drumstick"
-                size={16}
-                color="#E57373"
-              />
-              <Text style={styles.macroText}>
-                {Math.round(meal.macros.protein)}g
+          <View style={styles.metaRow}>
+            <View style={styles.meta}>
+              <IntensitySunIcon />
+              <Text style={styles.metaText}>
+                {isManual
+                  ? t('exercise.unspecified')
+                  : t('exercise.intensityNamed', {
+                      level: t(INTENSITY_KEYS[exercise.intensity]),
+                    })}
               </Text>
             </View>
-            <View style={styles.macro}>
-              <MaterialCommunityIcons name="barley" size={16} color="#FFA726" />
-              <Text style={styles.macroText}>
-                {Math.round(meal.macros.carbs)}g
-              </Text>
-            </View>
-            <View style={styles.macro}>
-              <AvocadoIcon size={16} color="#66BB6A" />
-              <Text style={styles.macroText}>
-                {Math.round(meal.macros.fat)}g
+            <View style={styles.meta}>
+              <Ionicons name="stopwatch-outline" size={14} color={colors.text} />
+              <Text style={styles.metaText}>
+                {isManual
+                  ? t('exercise.unspecified')
+                  : t('exercise.cardMins', { count: exercise.durationMinutes })}
               </Text>
             </View>
           </View>
-          {job.saveError ? (
-            <Text style={styles.saveError} numberOfLines={2}>
-              {t('processing.notSaved', { error: job.saveError })}
-            </Text>
-          ) : null}
         </View>
       </Pressable>
     );
   }
 
-  if (isRetakeError) {
-    return (
-      <View style={styles.card}>
-        <Pressable
-          style={styles.retakePressable}
-          onPress={() => retakeFromAnalysisCard(job.id)}
-          accessibilityRole="button"
-          accessibilityLabel={`${t('processing.noFood')}. ${t('processing.tapRetry')}`}
-        >
-          <Image source={{ uri: job.photo.uri }} style={styles.thumb} />
-          <View style={styles.body}>
-            <Text style={styles.retakeTitle} numberOfLines={1}>
-              {t('processing.noFood')}
-            </Text>
-            <View style={styles.retryPill}>
-              <Text style={styles.retryPillText}>{t('processing.tapRetry')}</Text>
-            </View>
-          </View>
-        </Pressable>
-        <Pressable
-          style={styles.retakeDismiss}
-          onPress={() => dismissMealAnalysis(job.id)}
-          accessibilityRole="button"
-          accessibilityLabel={t('common.dismiss')}
-          hitSlop={8}
-        >
-          <Ionicons name="close" size={16} color={colors.textMuted} />
-        </Pressable>
-      </View>
-    );
-  }
-
   return (
     <View style={styles.card}>
-      <MealThumbnail uri={job.photo.uri} progress={displayProgress} />
+      <ExerciseThumb progress={displayProgress} iconId="describe" />
       <View style={styles.body}>
         {isError ? (
           <>
             <Text style={styles.errorTitle} numberOfLines={2}>
-              {t('processing.couldntAnalyze')}
+              {t('processing.couldntEstimate')}
             </Text>
             <Text style={styles.errorBody} numberOfLines={2}>
               {job.error ?? t('meal.somethingWrong')}
@@ -288,13 +289,13 @@ export function MealProcessingCard({ job }: { job: MealAnalysisJob }) {
             <View style={styles.errorActions}>
               <Pressable
                 style={styles.retryButton}
-                onPress={() => retryMealAnalysis(job.id)}
+                onPress={() => retryExerciseEstimate(job.id)}
               >
                 <Text style={styles.retryText}>{t('common.retry')}</Text>
               </Pressable>
               <Pressable
                 style={styles.dismissButton}
-                onPress={() => dismissMealAnalysis(job.id)}
+                onPress={() => dismissExerciseEstimate(job.id)}
               >
                 <Text style={styles.dismissText}>{t('common.dismiss')}</Text>
               </Pressable>
@@ -309,25 +310,11 @@ export function MealProcessingCard({ job }: { job: MealAnalysisJob }) {
               <Ionicons name="flame" size={18} color={colors.textMuted} />
               <SkeletonBar width={110} height={20} pulse={pulse} />
             </View>
-            <View style={styles.macroRow}>
-              <View style={styles.macro}>
-                <MaterialCommunityIcons
-                  name="food-drumstick"
-                  size={16}
-                  color="#E57373"
-                />
-                <SkeletonBar width={28} height={14} pulse={pulse} />
-              </View>
-              <View style={styles.macro}>
-                <MaterialCommunityIcons name="barley" size={16} color="#FFA726" />
-                <SkeletonBar width={28} height={14} pulse={pulse} />
-              </View>
-              <View style={styles.macro}>
-                <AvocadoIcon size={16} color="#66BB6A" />
-                <SkeletonBar width={28} height={14} pulse={pulse} />
-              </View>
+            <View style={styles.metaRow}>
+              <SkeletonBar width={108} height={14} pulse={pulse} />
+              <SkeletonBar width={72} height={14} pulse={pulse} />
             </View>
-            <Text style={styles.status}>Analyzing meal…</Text>
+            <Text style={styles.status}>{t('processing.analyzingExercise')}</Text>
           </>
         )}
       </View>
@@ -343,34 +330,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     overflow: 'hidden',
     height: CARD_HEIGHT,
-    position: 'relative',
   },
-  retakePressable: {
-    flex: 1,
-    flexDirection: 'row',
-    height: CARD_HEIGHT,
-  },
-  retakeDismiss: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    zIndex: 1,
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surfaceElevated,
-  },
-  thumb: {
-    width: 108,
-    height: CARD_HEIGHT,
-    backgroundColor: colors.surfaceElevated,
+  cardPressed: {
+    opacity: 0.82,
   },
   thumbWrap: {
     width: 108,
     height: CARD_HEIGHT,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.card,
     position: 'relative',
+  },
+  iconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: '#E4E4E8',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   progressFocus: {
     ...StyleSheet.absoluteFillObject,
@@ -396,13 +376,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 8,
   },
-  mealTitle: {
+  title: {
     flex: 1,
     color: colors.text,
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: '600',
   },
-  mealTime: {
+  time: {
     color: colors.textMuted,
     fontSize: 12,
     fontWeight: '400',
@@ -412,32 +392,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
   },
-  mealCalories: {
+  calories: {
     color: colors.text,
     fontSize: 17,
     fontWeight: '600',
     marginLeft: -2,
   },
-  macroRow: {
+  metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
+    flexWrap: 'wrap',
   },
-  macro: {
+  meta: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 5,
   },
-  macroText: {
+  metaText: {
     color: colors.text,
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '400',
-  },
-  saveError: {
-    color: '#EF5350',
-    fontSize: 11,
-    lineHeight: 15,
-    marginTop: 6,
   },
   skeleton: {
     backgroundColor: colors.surfaceElevated,
@@ -451,26 +426,6 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 12,
     fontWeight: '500',
-  },
-  retakeTitle: {
-    color: '#EF5350',
-    fontSize: 16,
-    fontWeight: '500',
-    marginLeft: 6,
-    paddingRight: 28,
-  },
-  retryPill: {
-    alignSelf: 'flex-start',
-    marginLeft: 6,
-    backgroundColor: colors.surfaceElevated,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  retryPillText: {
-    color: colors.textSecondary,
-    fontSize: 13,
-    fontWeight: '600',
   },
   errorTitle: {
     color: colors.text,

@@ -105,8 +105,8 @@ const styles = StyleSheet.create({
   },
   time: {
     color: colors.textMuted,
-    fontSize: 13,
-    fontWeight: '500',
+    fontSize: 12,
+    fontWeight: '400',
   },
   calorieRow: {
     flexDirection: 'row',
