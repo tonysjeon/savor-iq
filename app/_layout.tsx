@@ -40,6 +40,17 @@ export default function RootLayout() {
         <Stack.Screen name="log-weights" options={{ headerShown: false }} />
         <Stack.Screen name="log-describe" options={{ headerShown: false }} />
         <Stack.Screen name="log-manual" options={{ headerShown: false }} />
+        <Stack.Screen name="log-burned" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="log-edit-calories"
+          options={{
+            headerShown: false,
+            presentation: 'fullScreenModal',
+            animation: 'slide_from_bottom',
+            animationDuration: 320,
+            gestureDirection: 'vertical',
+          }}
+        />
         <Stack.Screen name="saved-foods" options={{ headerShown: false }} />
         <Stack.Screen name="bmi-info" options={{ headerShown: false }} />
         <Stack.Screen name="meal/[id]" options={{ headerShown: false }} />
