@@ -20,12 +20,15 @@ import { AnimatedNumber } from '@/components/AnimatedNumber';
 import { ProgressRing } from '@/components/ProgressRing';
 import { MealProcessingCard } from '@/components/MealProcessingCard';
 import { MealHistoryCard } from '@/components/MealHistoryCard';
+import { ExerciseProcessingCard } from '@/components/ExerciseProcessingCard';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { colors } from '@/constants/theme';
 import type { MessageKey } from '@/lib/i18n';
 import {
+  listExercises,
   listNutritionAnalyses,
+  type SavedExercise,
   type SavedNutrition,
 } from '@/lib/firestore';
 import {
@@ -34,6 +37,12 @@ import {
   subscribeMealAnalysisJobs,
   type MealAnalysisJob,
 } from '@/lib/mealAnalysisQueue';
+import {
+  listExerciseEstimateJobs,
+  pruneReadyExerciseJobs,
+  subscribeExerciseEstimateJobs,
+  type ExerciseEstimateJob,
+} from '@/lib/exerciseEstimateQueue';
 import {
   getHistoryCacheSync,
   loadHistoryCache,
@@ -54,6 +63,8 @@ const WEEKDAY_KEYS = [
 ] as const;
 const CONTENT_GUTTER = 20;
 const SCREEN_WIDTH = Dimensions.get('window').width;
+const TAB_BAR_HEIGHT = 78;
+const RECENT_UPLOAD_LIMIT = 5;
 
 const DAILY_GOALS = {
   calories: 2000,
@@ -153,7 +164,9 @@ export default function HomeScreen() {
   const today = useMemo(() => new Date(), []);
   const [selectedDay, setSelectedDay] = useState(() => today);
   const [analyses, setAnalyses] = useState<SavedNutrition[]>([]);
+  const [exercises, setExercises] = useState<SavedExercise[]>([]);
   const [processingJobs, setProcessingJobs] = useState<MealAnalysisJob[]>([]);
+  const [exerciseJobs, setExerciseJobs] = useState<ExerciseEstimateJob[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pagerPage, setPagerPage] = useState(0);
   const [showEaten, setShowEaten] = useState(false);
@@ -169,12 +182,19 @@ export default function HomeScreen() {
         err instanceof Error ? err.message : 'Could not load meal history.',
       );
     }
+    try {
+      const nextExercises = await listExercises(uid, 100);
+      setExercises(nextExercises);
+    } catch {
+      // Local cache still shows workouts if Firestore rules lag behind.
+    }
   }, []);
 
   const applyCache = useCallback((uid: string) => {
     const syncCache = getHistoryCacheSync(uid);
     if (syncCache) {
       setAnalyses(dedupeAnalyses(syncCache.analyses));
+      setExercises(syncCache.exercises ?? []);
     }
   }, []);
 
@@ -195,9 +215,21 @@ export default function HomeScreen() {
   }, []);
 
   useEffect(() => {
+    setExerciseJobs(listExerciseEstimateJobs());
+    return subscribeExerciseEstimateJobs(() => {
+      setExerciseJobs(listExerciseEstimateJobs());
+    });
+  }, []);
+
+  useEffect(() => {
     const savedIds = new Set(analyses.map((item) => item.id));
     pruneReadyJobs(savedIds);
   }, [analyses]);
+
+  useEffect(() => {
+    const savedIds = new Set(exercises.map((item) => item.id));
+    pruneReadyExerciseJobs(savedIds);
+  }, [exercises]);
 
   useEffect(() => {
     let active = true;
@@ -215,6 +247,7 @@ export default function HomeScreen() {
     useCallback(() => {
       if (!user) {
         setAnalyses([]);
+        setExercises([]);
         return;
       }
       const uid = user.uid;
@@ -226,6 +259,7 @@ export default function HomeScreen() {
         if (!active) return;
         if (disk) {
           setAnalyses(dedupeAnalyses(disk.analyses));
+          setExercises(disk.exercises ?? []);
         }
 
         await refreshFromNetwork(uid);
@@ -254,11 +288,7 @@ export default function HomeScreen() {
     () => sumForDay(analyses, selectedDay),
     [analyses, selectedDay],
   );
-  const recentJobCards = useMemo(
-    () => processingJobs.slice(0, 10),
-    [processingJobs],
-  );
-  const recentMeals = useMemo(() => {
+  const recentItems = useMemo(() => {
     const jobResultIds = new Set(
       processingJobs
         .map((job) => job.result?.id)
@@ -270,12 +300,45 @@ export default function HomeScreen() {
         .filter((fp): fp is string => Boolean(fp)),
     );
 
-    return [...analyses]
+    const meals = processingJobs.map((job) => ({
+      kind: 'meal-job' as const,
+      createdAt: job.createdAt,
+      job,
+    }));
+    const visibleExerciseJobs = exerciseJobs.filter(
+      (job) => !user || !job.userId || job.userId === user.uid,
+    );
+    const exerciseJobIds = new Set(
+      visibleExerciseJobs.flatMap((job) => {
+        const ids = [job.id];
+        if (job.result?.id) ids.push(job.result.id);
+        return ids;
+      }),
+    );
+    const exerciseFromJobs = visibleExerciseJobs.map((job) => ({
+      kind: 'exercise' as const,
+      createdAt: job.createdAt,
+      job,
+    }));
+    const exerciseHistory = exercises
+      .filter((item) => !exerciseJobIds.has(item.id))
+      .map((item) => ({
+        kind: 'exercise' as const,
+        createdAt: item.createdAt,
+        job: {
+          id: item.id,
+          status: 'ready' as const,
+          description: item.description,
+          userId: user?.uid ?? null,
+          createdAt: item.createdAt,
+          progress: 100,
+          result: item,
+        },
+      }));
+    const history = analyses
       .filter((item) => {
         if (jobResultIds.has(item.id)) return false;
         if (jobFingerprints.has(analysisFingerprint(item))) return false;
-
-        // Hide cloud rows that land while this job is still analyzing/saving.
         for (const job of processingJobs) {
           if (job.status !== 'processing') continue;
           if (item.createdAt == null) continue;
@@ -283,10 +346,17 @@ export default function HomeScreen() {
         }
         return true;
       })
-      .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
-      .slice(0, Math.max(0, 10 - recentJobCards.length));
-  }, [analyses, processingJobs, recentJobCards.length]);
-  const hasRecentSection = recentJobCards.length > 0 || recentMeals.length > 0;
+      .map((item) => ({
+        kind: 'meal-history' as const,
+        createdAt: item.createdAt ?? 0,
+        item,
+      }));
+
+    return [...meals, ...exerciseFromJobs, ...exerciseHistory, ...history]
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, RECENT_UPLOAD_LIMIT);
+  }, [analyses, exerciseJobs, exercises, processingJobs, user]);
+  const hasRecentSection = recentItems.length > 0;
 
   const caloriesEaten = Math.round(dayTotals.calories);
   const calorieBalance = goalBalance(caloriesEaten, DAILY_GOALS.calories);
@@ -309,7 +379,13 @@ export default function HomeScreen() {
   return (
     <ScrollView
       style={styles.flex}
-      contentContainerStyle={[styles.content, { paddingTop: insets.top + 8 }]}
+      contentContainerStyle={[
+        styles.content,
+        {
+          paddingTop: insets.top + 12,
+          paddingBottom: TAB_BAR_HEIGHT + Math.max(insets.bottom, 12) + 6,
+        },
+      ]}
       showsVerticalScrollIndicator={false}
     >
       <PageHeader title="SavorIQ" showIcon />
@@ -409,7 +485,7 @@ export default function HomeScreen() {
                       strokeWidth={11}
                       progress={calorieProgress}
                       color={colors.text}
-                      trackColor={colors.surfaceElevated}
+                      trackColor={colors.progressTrack}
                     >
                       <Ionicons name="flame" size={22} color={colors.text} />
                     </ProgressRing>
@@ -456,7 +532,7 @@ export default function HomeScreen() {
                             strokeWidth={7}
                             progress={eaten / goal}
                             color={macro.color}
-                            trackColor={colors.surfaceElevated}
+                            trackColor={colors.progressTrack}
                             style={styles.macroRing}
                           >
                             {macro.key === 'fat' ? (
@@ -499,7 +575,7 @@ export default function HomeScreen() {
                         strokeWidth={7}
                         progress={avgHealthScore / 10}
                         color="#66BB6A"
-                        trackColor={colors.surfaceElevated}
+                        trackColor={colors.progressTrack}
                         style={styles.macroRing}
                       >
                         <MaterialCommunityIcons
@@ -521,7 +597,7 @@ export default function HomeScreen() {
                         strokeWidth={7}
                         progress={waterIntake / DAILY_GOALS.water}
                         color="#42A5F5"
-                        trackColor={colors.surfaceElevated}
+                        trackColor={colors.progressTrack}
                         style={styles.macroRing}
                       >
                         <MaterialCommunityIcons
@@ -572,7 +648,7 @@ export default function HomeScreen() {
                         strokeWidth={7}
                         progress={dayTotals.fiber / DAILY_GOALS.fiber}
                         color="#64B5F6"
-                        trackColor={colors.surfaceElevated}
+                        trackColor={colors.progressTrack}
                         style={styles.macroRing}
                       >
                         <MaterialCommunityIcons
@@ -618,7 +694,7 @@ export default function HomeScreen() {
                         strokeWidth={7}
                         progress={sugarIntake / DAILY_GOALS.sugar}
                         color="#F48FB1"
-                        trackColor={colors.surfaceElevated}
+                        trackColor={colors.progressTrack}
                         style={styles.macroRing}
                       >
                         <MaterialCommunityIcons
@@ -666,7 +742,7 @@ export default function HomeScreen() {
                         strokeWidth={7}
                         progress={sodiumIntake / DAILY_GOALS.sodium}
                         color="#90A4AE"
-                        trackColor={colors.surfaceElevated}
+                        trackColor={colors.progressTrack}
                         style={styles.macroRing}
                       >
                         <MaterialCommunityIcons
@@ -703,17 +779,27 @@ export default function HomeScreen() {
             </View>
           ) : (
             <>
-              {recentJobCards.map((job) => (
-                <MealProcessingCard key={job.id} job={job} />
-              ))}
-              {recentMeals.map((item) => (
-                <MealHistoryCard
-                  key={item.id}
-                  item={item}
-                  style={styles.recentMealCard}
-                  onPress={() => router.push(`/meal/${item.id}` as Href)}
-                />
-              ))}
+              {recentItems.map((item) => {
+                if (item.kind === 'exercise') {
+                  return (
+                    <ExerciseProcessingCard
+                      key={`exercise-${item.job.result?.createdAt ?? item.job.createdAt}`}
+                      job={item.job}
+                    />
+                  );
+                }
+                if (item.kind === 'meal-job') {
+                  return <MealProcessingCard key={item.job.id} job={item.job} />;
+                }
+                return (
+                  <MealHistoryCard
+                    key={item.item.id}
+                    item={item.item}
+                    style={styles.recentMealCard}
+                    onPress={() => router.push(`/meal/${item.item.id}` as Href)}
+                  />
+                );
+              })}
             </>
           )}
 
@@ -730,7 +816,6 @@ const styles = StyleSheet.create({
   content: {
     flexGrow: 1,
     paddingHorizontal: CONTENT_GUTTER,
-    paddingBottom: 40,
     backgroundColor: colors.page,
   },
   header: {

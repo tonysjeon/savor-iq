@@ -553,7 +553,7 @@ export default function OnboardingScreen() {
                     strokeWidth={9}
                     progress={1}
                     color={colors.text}
-                    trackColor={colors.surfaceElevated}
+                    trackColor={colors.progressTrack}
                   >
                     <Ionicons name="flame" size={20} color={colors.text} />
                   </ProgressRing>
@@ -562,21 +562,21 @@ export default function OnboardingScreen() {
                   <View style={styles.resultMacroCard}>
                     <Text style={styles.resultMacroValue}>{recommendation.proteinGrams}g</Text>
                     <Text style={styles.resultMacroLabel}>Protein</Text>
-                    <ProgressRing size={56} strokeWidth={6} progress={1} color="#E57373" trackColor={colors.surfaceElevated}>
+                    <ProgressRing size={56} strokeWidth={6} progress={1} color="#E57373" trackColor={colors.progressTrack}>
                       <MaterialCommunityIcons name="food-drumstick" size={16} color="#E57373" />
                     </ProgressRing>
                   </View>
                   <View style={styles.resultMacroCard}>
                     <Text style={styles.resultMacroValue}>{recommendation.carbsGrams}g</Text>
                     <Text style={styles.resultMacroLabel}>Carbs</Text>
-                    <ProgressRing size={56} strokeWidth={6} progress={1} color="#FFA726" trackColor={colors.surfaceElevated}>
+                    <ProgressRing size={56} strokeWidth={6} progress={1} color="#FFA726" trackColor={colors.progressTrack}>
                       <MaterialCommunityIcons name="barley" size={16} color="#FFA726" />
                     </ProgressRing>
                   </View>
                   <View style={styles.resultMacroCard}>
                     <Text style={styles.resultMacroValue}>{recommendation.fatGrams}g</Text>
                     <Text style={styles.resultMacroLabel}>Fats</Text>
-                    <ProgressRing size={56} strokeWidth={6} progress={1} color="#66BB6A" trackColor={colors.surfaceElevated}>
+                    <ProgressRing size={56} strokeWidth={6} progress={1} color="#66BB6A" trackColor={colors.progressTrack}>
                       <AvocadoIcon size={16} color="#66BB6A" />
                     </ProgressRing>
                   </View>
@@ -599,7 +599,7 @@ export default function OnboardingScreen() {
                   <View style={styles.resultDetailCard}>
                     <Text style={styles.resultDetailValue}>{recommendation.waterMl}ml</Text>
                     <Text style={styles.resultMacroLabel}>Water</Text>
-                    <ProgressRing size={56} strokeWidth={6} progress={1} color="#42A5F5" trackColor={colors.surfaceElevated}>
+                    <ProgressRing size={56} strokeWidth={6} progress={1} color="#42A5F5" trackColor={colors.progressTrack}>
                       <MaterialCommunityIcons name="cup-water" size={16} color="#42A5F5" />
                     </ProgressRing>
                   </View>
@@ -608,21 +608,21 @@ export default function OnboardingScreen() {
                   <View style={styles.resultMacroCard}>
                     <Text style={styles.resultMacroValue}>{recommendation.fiberGrams}g</Text>
                     <Text style={styles.resultMacroLabel}>Fiber</Text>
-                    <ProgressRing size={56} strokeWidth={6} progress={1} color="#64B5F6" trackColor={colors.surfaceElevated}>
+                    <ProgressRing size={56} strokeWidth={6} progress={1} color="#64B5F6" trackColor={colors.progressTrack}>
                       <MaterialCommunityIcons name="food-apple" size={16} color="#64B5F6" />
                     </ProgressRing>
                   </View>
                   <View style={styles.resultMacroCard}>
                     <Text style={styles.resultMacroValue}>{recommendation.sugarGrams}g</Text>
                     <Text style={styles.resultMacroLabel}>Sugar</Text>
-                    <ProgressRing size={56} strokeWidth={6} progress={1} color="#F48FB1" trackColor={colors.surfaceElevated}>
+                    <ProgressRing size={56} strokeWidth={6} progress={1} color="#F48FB1" trackColor={colors.progressTrack}>
                       <MaterialCommunityIcons name="candy" size={16} color="#F48FB1" />
                     </ProgressRing>
                   </View>
                   <View style={styles.resultMacroCard}>
                     <Text style={styles.resultMacroValue}>{recommendation.sodiumMg}mg</Text>
                     <Text style={styles.resultMacroLabel}>Sodium</Text>
-                    <ProgressRing size={56} strokeWidth={6} progress={1} color="#90A4AE" trackColor={colors.surfaceElevated}>
+                    <ProgressRing size={56} strokeWidth={6} progress={1} color="#90A4AE" trackColor={colors.progressTrack}>
                       <MaterialCommunityIcons name="shaker-outline" size={16} color="#90A4AE" />
                     </ProgressRing>
                   </View>

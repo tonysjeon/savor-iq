@@ -196,7 +196,7 @@ export function AppTabBar({ state, navigation }: BottomTabBarProps) {
         style={[
           styles.gridWrap,
           {
-            bottom: 68 + bottomPad + 18,
+            bottom: 68 + bottomPad + 20,
             opacity: menuProgress,
             transform: [
               {
@@ -320,7 +320,7 @@ const styles = StyleSheet.create({
   container: {
     paddingHorizontal: 16,
     paddingTop: 10,
-    transform: [{ translateY: 4 }],
+    transform: [{ translateY: 8 }],
   },
   row: {
     flexDirection: 'row',
@@ -331,12 +331,13 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 68,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'stretch',
     backgroundColor: colors.background,
     borderColor: 'rgba(17, 17, 17, 0.07)',
     borderWidth: 1,
     borderRadius: 34,
-    paddingHorizontal: 5,
+    paddingHorizontal: 3,
+    paddingVertical: 3,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.12,
@@ -348,8 +349,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 2,
-    minHeight: 56,
-    borderRadius: 28,
+    borderRadius: 31,
   },
   tabActive: {
     backgroundColor: colors.surface,
@@ -381,7 +381,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: 32,
     zIndex: 30,
-    transform: [{ translateY: 4 }],
+    transform: [{ translateY: 8 }],
     ...Platform.select({
       ios: {
         shadowColor: '#000000',

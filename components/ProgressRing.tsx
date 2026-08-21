@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 import { Animated, Easing, StyleSheet, View, type ViewStyle } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 
+import { colors } from '@/constants/theme';
+
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 type ProgressRingProps = {
@@ -14,6 +16,7 @@ type ProgressRingProps = {
   children?: ReactNode;
   style?: ViewStyle;
   animationDuration?: number;
+  animated?: boolean;
 };
 
 export function ProgressRing({
@@ -21,16 +24,20 @@ export function ProgressRing({
   strokeWidth,
   progress,
   color,
-  trackColor = '#E8E8E8',
+  trackColor = colors.progressTrack,
   children,
   style,
   animationDuration = 500,
+  animated = true,
 }: ProgressRingProps) {
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const clamped = Math.min(1, Math.max(0, progress));
+  // Round caps add bulk; only lift the tiniest values so they still paint.
+  const minVisible = (strokeWidth / circumference) * 0.22;
+  const visual = clamped > 0 ? Math.max(clamped, minVisible) : 0;
   const center = size / 2;
-  const animatedProgress = useRef(new Animated.Value(clamped)).current;
+  const animatedProgress = useRef(new Animated.Value(visual)).current;
   const hasMounted = useRef(false);
   const lastProgress = useRef(clamped);
   const activeAnim = useRef<Animated.CompositeAnimation | null>(null);
@@ -47,12 +54,20 @@ export function ProgressRing({
       activeAnim.current.start();
     };
 
+    if (!animated || animationDuration <= 0) {
+      activeAnim.current?.stop();
+      hasMounted.current = true;
+      lastProgress.current = clamped;
+      animatedProgress.setValue(visual);
+      return;
+    }
+
     if (!hasMounted.current) {
       // First paint: ease in from empty so initial load still feels alive.
       hasMounted.current = true;
       lastProgress.current = clamped;
       animatedProgress.setValue(0);
-      run(clamped, animationDuration + 100, Easing.out(Easing.cubic));
+      run(visual, animationDuration + 100, Easing.out(Easing.cubic));
       return;
     }
 
@@ -63,21 +78,21 @@ export function ProgressRing({
     // Ease-out crawls at the end when draining to empty; keep motion even.
     const emptying = clamped === 0 && from > 0;
     run(
-      clamped,
+      visual,
       emptying ? animationDuration * 0.76 : animationDuration,
       Easing.inOut(Easing.sin),
     );
-  }, [animationDuration, clamped, animatedProgress]);
+  }, [animated, animationDuration, clamped, visual, animatedProgress]);
 
   const strokeDashoffset = animatedProgress.interpolate({
     inputRange: [0, 1],
     outputRange: [circumference, 0],
   });
 
-  // Round caps leave a visible blob near 0 — fade the stroke out with it.
+  // Hide only the true empty state so round caps don't leave a speck at 0.
   const strokeOpacity = animatedProgress.interpolate({
-    inputRange: [0, 0.015, 0.04, 1],
-    outputRange: [0, 0, 1, 1],
+    inputRange: [0, 0.0001, 1],
+    outputRange: [0, 1, 1],
   });
 
   return (

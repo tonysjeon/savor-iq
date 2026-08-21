@@ -4,6 +4,7 @@ export const colors = {
   card: '#FFFFFF',
   surface: '#F2F2F2',
   surfaceElevated: '#E8E8E8',
+  progressTrack: '#EEF1F7',
   border: '#E0E0E0',
   text: '#111111',
   textSecondary: 'rgba(17, 17, 17, 0.7)',

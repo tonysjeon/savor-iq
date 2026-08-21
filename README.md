@@ -63,7 +63,7 @@ ref/           # Local Flutter reference (gitignored)
 
 ## Notes
 
-- **Home** tab: today’s macros from analyzed meals + recent meal list. Analyze via the center **+** button.
+- **Home** tab: today’s macros from analyzed meals + recent meal and workout list. Analyze via the center **+** button.
 - **Analyze** (`+`): opens the camera directly (gallery in the corner) → confirm → processing → results. Saved to `users/{uid}/analyses`.
 - **Chat** tab: choose Meal plan or Recipe, answer with option chips, get a plan or recipe in-thread (PDF export for plans).
 - **Calendar** tab: month view of analyzed meals; select a day for macros and meal list.
@@ -91,6 +91,10 @@ service cloud.firestore {
       }
 
       match /analyses/{document=**} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      match /exercises/{document=**} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
     }

@@ -646,3 +646,78 @@ Return ONLY valid JSON with this exact shape:
 
   return meals;
 }
+
+export type ExerciseEstimate = {
+  activity: string;
+  calories: number;
+  durationMinutes: number;
+  intensity: 'high' | 'medium' | 'low';
+  summary: string;
+};
+
+export async function estimateExerciseCalories(
+  description: string,
+  profile?: {
+    weightKg?: number;
+    heightCm?: number;
+    gender?: string | null;
+    age?: number;
+  },
+): Promise<ExerciseEstimate> {
+  const trimmed = description.trim();
+  if (!trimmed) {
+    throw new Error('No workout description provided.');
+  }
+
+  const body =
+    profile?.weightKg && profile.weightKg > 0
+      ? `Adult ${profile.gender ?? 'unspecified'}, about ${Math.round(profile.weightKg)} kg${
+          profile.heightCm ? `, ${Math.round(profile.heightCm)} cm` : ''
+        }${profile.age ? `, age ${profile.age}` : ''}.`
+      : 'Average adult, about 70 kg.';
+
+  const response = await post(
+    TEXT_MODEL,
+    [
+      {
+        text: `You are an exercise physiologist. Estimate calories burned for this workout.
+
+Person: ${body}
+Workout description: ${trimmed}
+
+Use MET values and duration inferred from the text. If duration is missing, assume a typical session for that activity. If intensity is missing, assume moderate.
+
+Return ONLY JSON:
+{
+  "activity": "Short activity name",
+  "calories": 0,
+  "durationMinutes": 0,
+  "intensity": "high" | "medium" | "low",
+  "summary": "one short sentence"
+}
+
+calories is an integer for this session only. durationMinutes is an integer.${outputLanguageInstruction()}`,
+      },
+    ],
+    {
+      temperature: 0.2,
+      maxOutputTokens: 512,
+      responseMimeType: 'application/json',
+      thinkingConfig: { thinkingBudget: 0 },
+    },
+  );
+
+  const data = parseJsonObject(extractText(response));
+  const intensityRaw = typeof data.intensity === 'string' ? data.intensity.toLowerCase() : 'medium';
+  const intensity: ExerciseEstimate['intensity'] =
+    intensityRaw === 'high' || intensityRaw === 'low' ? intensityRaw : 'medium';
+  const calories = Math.min(4000, Math.max(1, Math.round(toNumber(data.calories))));
+  const durationMinutes = Math.min(600, Math.max(1, Math.round(toNumber(data.durationMinutes, 30))));
+  const activity =
+    typeof data.activity === 'string' && data.activity.trim()
+      ? data.activity.trim()
+      : trimmed.slice(0, 48);
+  const summary = typeof data.summary === 'string' ? data.summary.trim() : '';
+
+  return { activity, calories, durationMinutes, intensity, summary };
+}
