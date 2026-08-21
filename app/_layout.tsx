@@ -36,6 +36,10 @@ export default function RootLayout() {
         <Stack.Screen name="account" options={{ headerShown: false }} />
         <Stack.Screen name="log-water" options={{ headerShown: false }} />
         <Stack.Screen name="log-exercise" options={{ headerShown: false }} />
+        <Stack.Screen name="log-run" options={{ headerShown: false }} />
+        <Stack.Screen name="log-weights" options={{ headerShown: false }} />
+        <Stack.Screen name="log-describe" options={{ headerShown: false }} />
+        <Stack.Screen name="log-manual" options={{ headerShown: false }} />
         <Stack.Screen name="saved-foods" options={{ headerShown: false }} />
         <Stack.Screen name="bmi-info" options={{ headerShown: false }} />
         <Stack.Screen name="meal/[id]" options={{ headerShown: false }} />
